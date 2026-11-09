@@ -188,10 +188,17 @@ export function detectFramework(projectRoot: string): DetectedProject {
   }
 
   // 6. Check static HTML files
-  if (fs.existsSync(path.join(projectRoot, 'index.html')) || (pkg && fs.existsSync(path.join(projectRoot, 'public', 'index.html')))) {
+  const hasRootIndex = fs.existsSync(path.join(projectRoot, 'index.html'));
+  const hasPublicIndex = fs.existsSync(path.join(projectRoot, 'public', 'index.html'));
+
+  if (hasRootIndex || hasPublicIndex) {
+    const outputDir = hasPublicIndex && !hasRootIndex ? 'public' : '.';
     return {
       type: 'static',
-      framework: FRAMEWORKS.static,
+      framework: {
+        ...FRAMEWORKS.static,
+        outputDir
+      },
       isWeb: true,
       hasPreviewScript: Boolean(pkg?.scripts?.preview || pkg?.scripts?.start || pkg?.scripts?.serve),
       hasBuildScript: Boolean(pkg?.scripts?.build),

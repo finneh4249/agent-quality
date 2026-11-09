@@ -38,7 +38,7 @@ export function extractActionableIssues(lhr: any): ActionableIssue[] {
         score: Math.round((audit.score || 0) * 100),
         displayValue: audit.displayValue || '',
         savings: numericSavings,
-        details: audit.details?.items?.slice(0, 3) || []
+        details: Array.isArray(audit.details?.items) ? audit.details.items.slice(0, 3) : []
       });
     }
   }

@@ -146,6 +146,21 @@ export function selectRepresentativeSample(routes: string[], limit = 4): string[
   return Array.from(selected);
 }
 
+export const DEFAULT_EXCLUDE_ROUTES = [
+  '/404',
+  '/404.html',
+  '/404/',
+  '/500',
+  '/500.html',
+  '/500/',
+  '/403',
+  '/403.html',
+  '/403/',
+  '/503',
+  '/503.html',
+  '/503/'
+];
+
 export function resolveRoutes({
   configRoutes = [],
   sampleRoutes = null,
@@ -189,13 +204,15 @@ export function resolveRoutes({
     allDiscovered = ['/'];
   }
 
+  const combinedExcludes = [...DEFAULT_EXCLUDE_ROUTES, ...(excludeRoutes || [])];
+
   const filtered = allDiscovered.filter((r) => {
-    return !excludeRoutes.some((pattern) => {
+    return !combinedExcludes.some((pattern) => {
       if (pattern.includes('*')) {
         const regex = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$');
         return regex.test(r);
       }
-      return r === pattern;
+      return r === pattern || r === pattern + '/';
     });
   });
 

@@ -24,37 +24,22 @@ export async function isPortOpen(port: number, host = '127.0.0.1'): Promise<bool
 }
 
 export async function checkUrlAlive(url: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    try {
-      const parsed = new URL(url);
-      const req = http.request(
-        {
-          hostname: parsed.hostname,
-          port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
-          path: parsed.pathname || '/',
-          method: 'GET',
-          timeout: 1000
-        },
-        (res) => {
-          resolve(Boolean(res.statusCode && res.statusCode >= 200 && res.statusCode < 500));
-        }
-      );
-      req.on('error', () => resolve(false));
-      req.on('timeout', () => {
-        req.destroy();
-        resolve(false);
-      });
-      req.end();
-    } catch {
-      resolve(false);
-    }
-  });
+  try {
+    const res = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(1500) });
+    return res.status >= 200 && res.status < 500;
+  } catch {
+    return false;
+  }
 }
 
-export async function waitForServer(url: string, timeoutMs = 30000): Promise<boolean> {
+export async function waitForServer(
+  urlGetter: () => string,
+  timeoutMs = 30000
+): Promise<boolean> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    if (await checkUrlAlive(url)) {
+    const currentUrl = urlGetter();
+    if (await checkUrlAlive(currentUrl)) {
       return true;
     }
     await new Promise((r) => setTimeout(r, 400));
@@ -179,8 +164,7 @@ export async function startPreviewServer({
   }
 
   // 3. Spawn preview command
-  const [cmd, ...args] = previewCommand.split(' ');
-  const child = spawn(cmd, args, {
+  const child = spawn(previewCommand, {
     cwd: projectRoot,
     stdio: ['ignore', 'pipe', 'pipe'],
     shell: true,
@@ -193,11 +177,24 @@ export async function startPreviewServer({
   });
 
   let serverOutput = '';
+  let currentUrl = targetUrl;
+
   child.stdout?.on('data', (d: Buffer) => {
-    serverOutput += d.toString();
+    const text = d.toString();
+    serverOutput += text;
+    // Extract dynamic port/URL if server assigned an alternative port
+    const match = text.match(/https?:\/\/(?:localhost|127\.0\.0\.1):(\d+)/i);
+    if (match) {
+      currentUrl = match[0];
+    }
   });
   child.stderr?.on('data', (d: Buffer) => {
-    serverOutput += d.toString();
+    const text = d.toString();
+    serverOutput += text;
+    const match = text.match(/https?:\/\/(?:localhost|127\.0\.0\.1):(\d+)/i);
+    if (match) {
+      currentUrl = match[0];
+    }
   });
 
   let exitError: Error | null = null;
@@ -207,7 +204,7 @@ export async function startPreviewServer({
     }
   });
 
-  const alive = await waitForServer(targetUrl, timeoutMs);
+  const alive = await waitForServer(() => currentUrl, timeoutMs);
   if (!alive) {
     try {
       if (child.pid) process.kill(-child.pid, 'SIGTERM');
@@ -217,11 +214,11 @@ export async function startPreviewServer({
     if (exitError) {
       throw exitError;
     }
-    throw new Error(`Timed out waiting for preview server at ${targetUrl}.\nOutput:\n${serverOutput}`);
+    throw new Error(`Timed out waiting for preview server at ${currentUrl}.\nOutput:\n${serverOutput}`);
   }
 
   return {
-    url: targetUrl,
+    url: currentUrl,
     attached: false,
     stop: async () => {
       try {
