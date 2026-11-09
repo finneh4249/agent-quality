@@ -1,0 +1,32 @@
+{
+  "name": "agent-quality",
+  "version": "1.0.0",
+  "description": "Cross-project global agent quality gate and Lighthouse audit runner",
+  "type": "module",
+  "bin": {
+    "agent-quality": "./bin/agent-quality.js"
+  },
+  "main": "./src/index.js",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "keywords": [
+    "lighthouse",
+    "agent",
+    "quality-gate",
+    "ci",
+    "audit"
+  ],
+  "author": "Ethan Cornwill",
+  "license": "MIT",
+  "dependencies": {
+    "chrome-launcher": "^1.2.3",
+    "commander": "^15.1.0",
+    "lighthouse": "^13.6.0",
+    "picocolors": "^1.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2"
+  }
+}
