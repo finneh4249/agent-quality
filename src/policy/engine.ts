@@ -37,12 +37,24 @@ export class PolicyEngine {
       let routePassed = true;
       const profilesSummary: Record<string, any> = {};
 
+      // Merge metrics by profile across all providers for this route
+      const mergedMetricsByProfile = new Map<string, Record<string, number>>();
       for (const obs of obsList) {
         const profile = obs.profile || 'default';
+        const current = mergedMetricsByProfile.get(profile) || {};
+        mergedMetricsByProfile.set(profile, { ...current, ...obs.metrics });
+      }
+
+      for (const [profile, mergedMetrics] of mergedMetricsByProfile.entries()) {
         profilesSummary[profile] = {};
 
         for (const [category, thresholdCfg] of Object.entries(this.policy.thresholds)) {
-          const score = obs.metrics[category] ?? 0;
+          // If a metric was not measured by any applicable provider for this profile, skip it
+          if (mergedMetrics[category] === undefined) {
+            continue;
+          }
+
+          const score = mergedMetrics[category];
           const target = thresholdCfg.threshold;
           const failureMode = thresholdCfg.failureMode;
 
