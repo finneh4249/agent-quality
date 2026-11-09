@@ -77,28 +77,60 @@ export function printTerminalReport(result: NormalisedResult): void {
   }
 
   if (result.findings && result.findings.length > 0) {
-    console.log(pc.bold('  Actionable Findings:'));
-    for (const f of result.findings.slice(0, 5)) {
-      const badge = f.severity === 'failure'
-        ? pc.red('[FAIL]')
-        : f.severity === 'warning'
-        ? pc.yellow('[WARN]')
-        : pc.cyan('[INFO]');
-      const catBadge = pc.dim(`(${f.category})`);
-      const scoreStr = f.score !== null ? pc.dim(` [Score: ${f.score}]`) : '';
+    const archFindings = result.findings.filter((f) => f.category === 'architecture');
+    const standardFindings = result.findings.filter((f) => f.category !== 'architecture');
 
-      console.log(`    ${badge} ${pc.bold(f.title)} ${catBadge}${scoreStr}`);
-      if (f.element) {
-        console.log(`      ${pc.dim('Element:')} ${pc.yellow(f.element.slice(0, 80))}`);
+    if (archFindings.length > 0) {
+      console.log(pc.bold('  Architecture Health & Structural Delta:'));
+      for (const f of archFindings) {
+        const typeBadge = f.evidenceType === 'fact'
+          ? pc.cyan('[FACT]')
+          : f.evidenceType === 'heuristic'
+          ? pc.magenta('[HEURISTIC]')
+          : pc.blue('[ADVISORY]');
+
+        const sevBadge = f.severity === 'failure'
+          ? pc.red('[FAIL]')
+          : f.severity === 'warning'
+          ? pc.yellow('[WARN]')
+          : pc.dim('[INFO]');
+
+        console.log(`    ${sevBadge} ${typeBadge} ${pc.bold(f.title)}`);
+        console.log(`      ${pc.dim(f.description)}`);
+        if (f.element) {
+          console.log(`      ${pc.dim('Target:')}  ${pc.yellow(f.element)}`);
+        }
+        if (f.explanation) {
+          console.log(`      ${pc.dim('Context:')} ${pc.dim(f.explanation)}`);
+        }
       }
-      if (f.url) {
-        console.log(`      ${pc.dim('Target:')}  ${pc.underline(f.url)}`);
-      }
-      if (f.explanation) {
-        console.log(`      ${pc.dim(f.explanation)}`);
-      }
+      console.log('');
     }
-    console.log('');
+
+    if (standardFindings.length > 0) {
+      console.log(pc.bold('  Actionable Findings:'));
+      for (const f of standardFindings.slice(0, 5)) {
+        const badge = f.severity === 'failure'
+          ? pc.red('[FAIL]')
+          : f.severity === 'warning'
+          ? pc.yellow('[WARN]')
+          : pc.cyan('[INFO]');
+        const catBadge = pc.dim(`(${f.category})`);
+        const scoreStr = f.score !== null ? pc.dim(` [Score: ${f.score}]`) : '';
+
+        console.log(`    ${badge} ${pc.bold(f.title)} ${catBadge}${scoreStr}`);
+        if (f.element) {
+          console.log(`      ${pc.dim('Element:')} ${pc.yellow(f.element.slice(0, 80))}`);
+        }
+        if (f.url) {
+          console.log(`      ${pc.dim('Target:')}  ${pc.underline(f.url)}`);
+        }
+        if (f.explanation) {
+          console.log(`      ${pc.dim(f.explanation)}`);
+        }
+      }
+      console.log('');
+    }
   } else if (result.topIssues && result.topIssues.length > 0) {
     console.log(pc.bold('  Highest-Impact Actionable Issues:'));
     for (const issue of result.topIssues.slice(0, 4)) {

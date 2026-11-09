@@ -22,9 +22,9 @@ A reusable, cross-project quality audit tool and autonomous agent quality gate t
                     │ prepares ExecutionContext      │
                     ▼                                ▼
 ┌──────────────────────────────────────┐  ┌──────────────────────────────┐
-│       Quality Provider (v0.1)        │  │   Future Provider (v0.2+)    │
-│        LighthouseProvider            │  │        AxeCoreProvider       │
-│   (3-run median, mobile/desktop)     │  │   (Automated WCAG 2.2 AA)    │
+│       Web Quality Provider           │  │  Architecture Health Provider│
+│        LighthouseProvider            │  │   ArchitectureHealthProvider │
+│   (3-run median, mobile/desktop)     │  │ (Delta, AST duplication, etc)│
 └───────────────────┬──────────────────┘  └──────────────┬───────────────┘
                     │ observations                       │ observations
                     └─────────────────┬──────────────────┘
@@ -222,7 +222,22 @@ export default {
     performance: { threshold: 90, failureMode: "warning" },
     accessibility: { threshold: 95, failureMode: "failure" },
     "best-practices": { threshold: 95, failureMode: "failure" },
-    seo: { threshold: 95, failureMode: "failure" }
+    seo: { threshold: 95, failureMode: "failure" },
+    "architecture-rules": { threshold: 100, failureMode: "failure" }
+  },
+
+  // Architecture Health & Structural Delta rules
+  architecture: {
+    baselineRef: "origin/main",
+    layers: [
+      { name: "pages", pattern: "src/pages/**", allowedDependencies: ["components", "layouts", "styles"] },
+      { name: "components", pattern: "src/components/**", forbiddenDependencies: ["pages"] }
+    ],
+    protectedModules: ["src/styles/global.css", "astro.config.*"],
+    componentReuseExpectations: { warnOnSingleUseDirectory: ["src/components/case/**"] },
+    exceptions: [
+      { ruleId: "protected-module", target: "src/styles/global.css", reason: "Brand update" }
+    ]
   },
 
   // Number of runs per route profile

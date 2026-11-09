@@ -6,6 +6,40 @@ export type ProjectFrameworkType = 'astro' | 'vite' | 'next' | 'nuxt' | 'sveltek
 
 export type FindingSeverity = 'failure' | 'warning' | 'info';
 
+export type ArchitectureEvidenceType = 'fact' | 'heuristic' | 'advisory';
+
+export interface ArchitectureRuleException {
+  ruleId: string;
+  target: string;
+  reason: string;
+}
+
+export interface ArchitectureLayerRule {
+  name: string;
+  pattern: string;
+  allowedDependencies?: string[];
+  forbiddenDependencies?: string[];
+  description?: string;
+}
+
+export interface ProtectedModuleRule {
+  pattern: string;
+  reason?: string;
+}
+
+export interface ArchitectureConfig {
+  baselineRef?: string;
+  layers?: ArchitectureLayerRule[];
+  protectedModules?: (string | ProtectedModuleRule)[];
+  componentReuseExpectations?: {
+    warnOnSingleUseDirectory?: string[];
+    minConsumersForExtraction?: number;
+  };
+  exceptions?: ArchitectureRuleException[];
+  ignorePaths?: string[];
+  enableAiReview?: boolean;
+}
+
 export interface ActionableFinding {
   id: string;
   title: string;
@@ -20,6 +54,8 @@ export interface ActionableFinding {
   savings?: number;
   displayValue?: string;
   details?: unknown[];
+  evidenceType?: ArchitectureEvidenceType;
+  ruleId?: string;
 }
 
 export interface ActionableIssue {
@@ -76,6 +112,9 @@ export interface ProviderCapabilities {
   supportsMobile: boolean;
   supportsDesktop: boolean;
   supportsMultiRun: boolean;
+  requiresBrowser?: boolean;
+  requiresServer?: boolean;
+  scope?: 'route' | 'project';
 }
 
 export interface ProviderObservation {

@@ -48,10 +48,29 @@ export function createMarkdownReport(result: NormalisedResult): string {
     }
   }
 
-  if (result.findings && result.findings.length > 0) {
+  const archFindings = result.findings ? result.findings.filter((f) => f.category === 'architecture') : [];
+  const standardFindings = result.findings ? result.findings.filter((f) => f.category !== 'architecture') : [];
+
+  if (archFindings.length > 0) {
+    lines.push('## Architecture Health & Structural Delta');
+    lines.push('');
+    lines.push('| Type | Severity | Title | Evidence / Target | Details |');
+    lines.push('|---|---|---|---|---|');
+
+    for (const f of archFindings) {
+      const typeLabel = f.evidenceType ? f.evidenceType.toUpperCase() : 'HEURISTIC';
+      const sevLabel = f.severity.toUpperCase();
+      const target = f.element ? `\`${f.element}\`` : '-';
+      const details = (f.explanation || f.description).replace(/\|/g, '\\|');
+      lines.push(`| **${typeLabel}** | \`${sevLabel}\` | ${f.title} | ${target} | ${details} |`);
+    }
+    lines.push('');
+  }
+
+  if (standardFindings.length > 0) {
     lines.push('## Actionable Findings');
     lines.push('');
-    for (const f of result.findings) {
+    for (const f of standardFindings) {
       lines.push(`### [${f.severity.toUpperCase()}] ${f.title} (${f.category})`);
       if (f.score !== null) lines.push(`- **Score**: ${f.score}/100 (Weight: ${f.weight || 0})`);
       if (f.element) lines.push(`- **Element**: \`${f.element}\``);

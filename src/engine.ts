@@ -7,6 +7,7 @@ import { resolveRoutes } from './discovery/routes.js';
 import { launchHeadlessChrome } from './environment/chrome.js';
 import { startPreviewServer } from './environment/server.js';
 import { LighthouseProvider } from './providers/lighthouse.js';
+import { ArchitectureHealthProvider } from './providers/architecture/provider.js';
 import { PolicyEngine } from './policy/engine.js';
 import {
   AuditPlan,
@@ -187,34 +188,45 @@ export async function runQualityAudit(options: AuditOptions = {}): Promise<Norma
       previewUrl: config.previewUrl,
       outputDir,
       targets,
-      applicableProviders: ['lighthouse'],
+      applicableProviders: [],
       configSource: config._source
     };
 
     // 7. Initialize Providers
-    const providers: QualityProvider[] = [new LighthouseProvider()];
+    const providers: QualityProvider[] = [
+      new LighthouseProvider(),
+      new ArchitectureHealthProvider(config.architecture)
+    ];
     const activeProviders = providers.filter((p) => p.isApplicable(plan));
+    plan.applicableProviders = activeProviders.map((p) => p.id);
 
-    // 8. Start Preview Server & Launch Chrome
+    // 8. Start Preview Server & Launch Chrome (only if required by active providers)
     let serverHandle: { url: string; attached: boolean; stop: () => Promise<void> } | null = null;
     let chromeHandle: { port: number; kill: () => Promise<void> } | null = null;
 
-    try {
-      serverHandle = await startPreviewServer({
-        projectRoot: appDir,
-        previewCommand: plan.previewCommand,
-        previewUrl: plan.previewUrl,
-        defaultPort: detected.framework?.defaultPort || 4173,
-        outputDir,
-        env: config.env
-      });
+    const needsServer = activeProviders.some((p) => p.getCapabilities().requiresServer !== false);
+    const needsBrowser = activeProviders.some((p) => p.getCapabilities().requiresBrowser !== false);
 
-      chromeHandle = await launchHeadlessChrome();
+    try {
+      if (needsServer) {
+        serverHandle = await startPreviewServer({
+          projectRoot: appDir,
+          previewCommand: plan.previewCommand,
+          previewUrl: plan.previewUrl,
+          defaultPort: detected.framework?.defaultPort || 4173,
+          outputDir,
+          env: config.env
+        });
+      }
+
+      if (needsBrowser) {
+        chromeHandle = await launchHeadlessChrome();
+      }
 
       const context: ExecutionContext = {
         projectRoot: appDir,
-        baseUrl: serverHandle.url,
-        chrome: chromeHandle,
+        baseUrl: serverHandle?.url || '',
+        chrome: chromeHandle || { port: 0, kill: async () => {} },
         tempDir: fs.mkdtempSync(path.join(os.tmpdir(), 'aqg-')),
         auth: {
           headers: config.auth?.headers || {},
@@ -234,8 +246,37 @@ export async function runQualityAudit(options: AuditOptions = {}): Promise<Norma
       const allIssues: ActionableIssue[] = [];
       const allFindingsList: any[] = [];
 
+      // A. Execute project-scoped providers once
+      for (const provider of activeProviders) {
+        if (provider.getCapabilities().scope === 'project') {
+          const projectTarget: TargetPlan = {
+            route: '__architecture__',
+            profiles: ['desktop'],
+            runs: 1
+          };
+          const obsList = await provider.execute(projectTarget, context);
+          for (const obs of obsList) {
+            allObservations.push(obs);
+            if (obs.rawArtifacts?.html) {
+              htmlReports[`architecture_${obs.profile || 'default'}`] = obs.rawArtifacts.html;
+            }
+            if (obs.rawArtifacts?.json) {
+              rawJsonReports[`architecture_${obs.profile || 'default'}`] = obs.rawArtifacts.json;
+            }
+            if (obs.issues) {
+              allIssues.push(...obs.issues);
+            }
+            if (obs.findings) {
+              allFindingsList.push(...obs.findings);
+            }
+          }
+        }
+      }
+
+      // B. Execute route-scoped providers for each target
       for (const target of targets) {
         for (const provider of activeProviders) {
+          if (provider.getCapabilities().scope === 'project') continue;
           const obsList = await provider.execute(target, context);
           for (const obs of obsList) {
             allObservations.push(obs);

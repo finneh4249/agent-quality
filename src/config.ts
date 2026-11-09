@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { QualityPolicy, CategoryThreshold } from './types.js';
+import { QualityPolicy, CategoryThreshold, ArchitectureConfig } from './types.js';
 
 export const DEFAULT_THRESHOLDS: Record<string, CategoryThreshold> = {
   performance: {
@@ -18,6 +18,10 @@ export const DEFAULT_THRESHOLDS: Record<string, CategoryThreshold> = {
   },
   seo: {
     threshold: 95,
+    failureMode: 'failure'
+  },
+  'architecture-rules': {
+    threshold: 100,
     failureMode: 'failure'
   }
 };
@@ -40,6 +44,7 @@ export interface AgentQualityConfig {
   };
   allowedExclusions?: string[];
   env?: Record<string, string>;
+  architecture?: ArchitectureConfig;
   _source?: string;
 }
 

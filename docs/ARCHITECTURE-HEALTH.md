@@ -1,0 +1,182 @@
+# Architecture Health Provider (`architecture-health`)
+
+An architectural change and structural health provider for **Agent Quality Gate (AQG)** that prevents the recurring failure in AI-assisted development where an agent removes technical debt, only to recreate it while implementing subsequent features.
+
+---
+
+## 1. Motivation: The AI Debt Recreation Cycle
+
+Autonomous coding agents (e.g. Claude Code, Gemini CLI, OpenCode, Codex) excel at refactoring code and completing feature requests. However, when instructed to implement multi-page features or design systems, agents consistently exhibit a common set of structural antipatterns:
+
+1. **Proliferation of Single-Use Components**: Rather than composing reusable primitives or driving views with data, agents write dozens of bespoke, one-off component files.
+2. **Structural Duplication**: Components differ only by hardcoded string literals or column arrays, sharing 90%+ identical AST/DOM templates.
+3. **Change Amplification**: A localized feature request forces modifications to global layouts, error routes, build scripts, and style sheets.
+4. **Bypassing Architectural Boundaries**: Components import directly from forbidden layers (e.g. UI widgets importing from pages, or core engines importing view templates).
+5. **Hardcoding Derived Metadata**: Repeating titles, dates, or tags in component code that already exist in content collections or data models.
+
+### Real-World Case Study: `finneh.xyz`
+During the Phase 2 visual system overhaul in `finneh.xyz` (commit `f12023a`):
+- **24 visual components** were added to `src/components/case/`.
+- Concurrently, **5 genuine modular abstractions** were authored (`CaseFigure.astro`, `ComparisonGrid.astro`, `FlowDiagram.astro`, `LayerStack.astro`, `StateTrack.astro`).
+- However, 19 single-use wrapper components were created (such as `AometryBoundary.astro` and `UndergroundBoundary.astro`), which exhibited identical `<CaseFigure><ComparisonGrid /></CaseFigure>` skeletons.
+- Changes amplified across **87 files**, including error templates (`src/pages/403.astro`), global styling (`src/styles/global.css`), and resume routes.
+- Linters and tests were green because the code was syntactically valid and passed accessibility gates, yet structural maintenance costs increased significantly.
+
+A naive gate that penalises "lines of code" or "number of files added" would incorrectly fail the extraction of reusable abstractions. AQG's Architecture Health provider solves this by measuring architectural change **relative to a Git baseline** and distinguishing **facts**, **heuristics**, and **declared rule violations**.
+
+---
+
+## 2. Three-Tier Epistemic Classification
+
+To prevent subjective, flaky, or hallucinated quality failures, AQG categorizes all findings into three strict epistemic tiers:
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                        Tier 1: Observed Facts                          │
+│   (Objectively verifiable: added/deleted files, import edges, diffs)   │
+├────────────────────────────────────────────────────────────────────────┤
+│                       Tier 2: Structural Heuristics                    │
+│     (Similarity ratios, dispersion metrics, duplication clusters)       │
+├────────────────────────────────────────────────────────────────────────┤
+│                       Tier 3: Advisory AI Judgements                   │
+│         (Optional, non-blocking semantic and intent assessments)       │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+| Tier | Category | Verifiability | Policy Impact | Examples |
+|---|---|---|---|---|
+| **Tier 1** | **Observed Facts** | Mathematical / AST deterministic | Info / Facts | Added/deleted components, fan-in reuse count, dependency manifest diff. |
+| **Tier 2** | **Structural Heuristics** | Algorithmic thresholds & pattern matching | Advisory Warning (Exit 0) | Structural duplication (>85% matching skeleton), change amplification (>25% dispersion), hardcoded metadata matches. |
+| **Tier 3** | **Advisory AI Judgements** | Natural language / LLM semantic review | Advisory Info/Warn (Exit 0) | Intent analysis, suggestions for data modeling vs component extraction. |
+
+### The Core Gating Invariant
+> **Only objectively verifiable violations of declared project architecture rules can trigger gate failures (`severity: 'failure'`).**
+> Heuristics, component counts, or proliferation metrics produce warnings and evidence, but **never** fail a build on their own.
+
+---
+
+## 3. Configuration & Architecture Rules
+
+Add an optional `architecture` block to your `agent-quality.config.js` or `.agentqualityrc.json`:
+
+```javascript
+// agent-quality.config.js
+export default {
+  architecture: {
+    // Git baseline ref (defaults to working-tree vs HEAD, or HEAD vs HEAD~1)
+    baselineRef: "origin/main",
+
+    // 1. Layer boundaries & allowed dependency directions
+    layers: [
+      {
+        name: "pages",
+        pattern: "src/pages/**",
+        allowedDependencies: ["components", "layouts", "styles", "data"]
+      },
+      {
+        name: "components",
+        pattern: "src/components/**",
+        forbiddenDependencies: ["pages"] // UI components must never import pages
+      },
+      {
+        name: "data",
+        pattern: "src/data/**",
+        allowedDependencies: [] // Pure data layer
+      }
+    ],
+
+    // 2. Protected modules (cannot be touched without explicit exception)
+    protectedModules: [
+      "src/styles/global.css",
+      "astro.config.*",
+      "public/_headers"
+    ],
+
+    // 3. Component reuse expectations
+    componentReuseExpectations: {
+      warnOnSingleUseDirectory: ["src/components/case/**"],
+      minConsumersForExtraction: 2
+    },
+
+    // 4. Explicit exceptions with mandatory rationale
+    exceptions: [
+      {
+        ruleId: "protected-module",
+        target: "src/styles/global.css",
+        reason: "Design token alignment for Phase 2 visual release"
+      },
+      {
+        ruleId: "layer-boundary:components->pages",
+        target: "src/components/SpecialMigration.astro",
+        reason: "Temporary bridge during router refactoring"
+      }
+    ]
+  }
+};
+```
+
+---
+
+## 4. Key Analyser Capabilities
+
+### A. Modularity Counterexamples vs Single-Use Proliferation
+AQG constructs a component consumption graph by scanning imports across the workspace:
+- **Modular Abstraction (Positive)**: When a newly added component is imported by $\ge 2$ consumers (e.g. `CaseFigure.astro`), AQG highlights this as a maintainability improvement.
+- **Single-Use Component (Observed)**: When a component has only 1 consumer (e.g. `AometryBoundary.astro`).
+- **Reuse Ratio**: Percentage of project components that are actively reused across views.
+
+### B. Structural Duplication Engine
+Extracts normalized structural skeletons by stripping Astro frontmatter, script tags, style blocks, text nodes, and HTML comments.
+- Calculates Jaccard similarity across structural tokens.
+- Clusters components with $\ge 85\%$ structural match.
+- Emits evidence with shared skeleton: `<CaseFigure > ComparisonGrid>`.
+
+### C. Change Amplification (Subsystem Dispersion)
+Partitions changed files into architectural subsystems (`components:case`, `pages`, `styles`, `data`, `config`, etc.).
+- Identifies the primary feature cluster.
+- Measures the **dispersion ratio**:
+  $$\text{Dispersion Ratio} = \frac{\text{Changed files outside primary subsystem}}{\text{Total changed files}}$$
+- Emits advisory warnings when dispersion exceeds $25\%$ on non-trivial diffs.
+
+### D. Hardcoded Collection Metadata Detection
+Scans Astro content collections (`src/content/**`) and data schemas for canonical entity values (titles, dates, tags).
+- Searches newly created components for duplicate string literals ($\ge 8$ chars).
+- Directs agents to bind to props or query collections via `getCollection()` rather than hardcoding duplicates.
+
+### E. Dependency Manifest Diffing
+Compares `dependencies` and `devDependencies` in `package.json` against the Git baseline.
+- Flags added packages, removals, and major/minor version increments.
+
+---
+
+## 5. False-Positive Limitations & Mitigation
+
+Heuristics are by definition probabilistic. AQG explicitly accounts for scenarios where architectural metrics could suggest debt where none exists:
+
+| Scenario | Potential False Positive | AQG Mitigation Strategy |
+|---|---|---|
+| **Design System Atomics** | Simple buttons or input primitives naturally share small skeletons. | Small skeletons ($< 4$ tags) are ignored; similarity threshold set to $85\%$. |
+| **Isomorphic Test Fixtures** | Test mocks often look identical structurally. | Test directories (`test/**`, `tests/**`) are automatically excluded from duplication clusters. |
+| **Legitimate Site-Wide Refactors** | Updating a design token legitimately touches `src/styles/global.css` and multiple pages. | Change amplification is strictly advisory; protected modules can be unblocked with a one-line exception and rationale. |
+| **Common Vocabulary Strings** | Short words like "Home" or "Documentation" appearing in both metadata and UI. | Minimum string length filter of $\ge 8$ characters, excluding URLs, code tokens, and array delimiters. |
+| **Prototyping Spikes** | Adding 10 new experimental components in early feature phases. | Component count never fails the gate. Only declared rule violations block exit. |
+
+---
+
+## 6. Future Roadmap
+
+### Phase 2: Deeper Static Analysis
+- **TypeScript Compiler API Integration**:
+  - Full type-directed import resolution and symbol tracing.
+  - Cycle detection in module graphs ($O(V + E)$ Tarjan's strongly connected components).
+  - Taint tracking for unescaped user inputs in component templates.
+- **Cross-Language Analyser Seams**:
+  - **Python**: AST visitor analyzing `imports`, measuring circular dependencies, and checking layer boundaries via `importlib` and `sys.modules` conventions.
+  - **Rust**: AST parsing via `syn` / `cargo metadata` checking module visibility (`pub(crate)`) and dependency tree expansion.
+
+### Phase 3: Optional Advisory AI Review
+- **Intent-Aware Architecture Critique**:
+  - When enabled (`enableAiReview: true`), AQG generates a contextual summary of the Git diff, structural duplication clusters, and out-of-scope files.
+  - An LLM prompt evaluates: *"Is this structural duplication intentional polymorphism or accidental copy-paste?"*
+  - The model outputs advisory observations marked `[ADVISORY]`.
+  - **Hard constraint**: AI judgements are advisory only and cannot fail the quality gate.
