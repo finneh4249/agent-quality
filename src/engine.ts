@@ -87,9 +87,57 @@ export async function runQualityAudit(options: AuditOptions = {}): Promise<Norma
 
     // 3. Project & Framework Discovery
     const detected = detectFramework(appDir);
+    const isWeb = Boolean(detected.isWeb && detected.type !== 'non_web');
 
-    // If non-web project, return not_applicable immediately (Exit 0)
-    if (!detected.isWeb || detected.type === 'non_web') {
+    // 4. Route Discovery (only for web projects with routes)
+    const outputDir = config.outputDir || detected.framework?.outputDir || 'dist';
+    let targets: TargetPlan[] = [];
+
+    if (isWeb) {
+      const discoveredRoutes = resolveRoutes({
+        configRoutes: config.routes,
+        sampleRoutes: config.sampleRoutes,
+        excludeRoutes: config.excludeRoutes,
+        projectRoot: appDir,
+        outputDir,
+        mode: options.mode || 'sample'
+      });
+
+      const profiles: Array<'mobile' | 'desktop'> = config.profiles || ['mobile', 'desktop'];
+      const runs = config.runs || 3;
+
+      targets = discoveredRoutes.map((route) => ({
+        route,
+        profiles,
+        runs
+      }));
+    }
+
+    // 5. Build the Audit Plan
+    const plan: AuditPlan = {
+      projectId,
+      projectName,
+      projectRoot: appDir,
+      projectType: detected.type,
+      isWeb,
+      previewCommand: config.previewCommand || detected.framework?.defaultPreviewCommand,
+      previewUrl: config.previewUrl,
+      outputDir,
+      targets,
+      applicableProviders: [],
+      configSource: config._source
+    };
+
+    // 6. Initialize Providers
+    const providers: QualityProvider[] = [
+      new LighthouseProvider(),
+      new ArchitectureHealthProvider(config.architecture)
+    ];
+    const activeProviders = providers.filter((p) => p.isApplicable(plan));
+    plan.applicableProviders = activeProviders.map((p) => p.id);
+
+    // If no quality providers are applicable, return not_applicable immediately (Exit 0)
+    if (activeProviders.length === 0) {
       const naResult: NormalisedResult = {
         schemaVersion: 'aqg.result.v1',
         timestamp: new Date().toISOString(),
@@ -97,16 +145,8 @@ export async function runQualityAudit(options: AuditOptions = {}): Promise<Norma
         projectName,
         projectRoot,
         status: 'not_applicable',
-        reason: detected.reason || 'Non-web project: no frontend web interface or static HTML detected',
-        plan: {
-          projectId,
-          projectName,
-          projectRoot: appDir,
-          projectType: 'non_web',
-          isWeb: false,
-          targets: [],
-          applicableProviders: []
-        },
+        reason: detected.reason || 'No applicable quality providers found for this project type',
+        plan,
         observations: [],
         topIssues: [],
         findings: [],
@@ -123,7 +163,7 @@ export async function runQualityAudit(options: AuditOptions = {}): Promise<Norma
       return naResult;
     }
 
-    // 4. Hook Deduplication Guard: Check if working tree unchanged since last passed run
+    // 7. Hook Deduplication Guard: Check if working tree unchanged since last passed run
     if (options.isHookExecution && shouldSkipUnchanged(projectRoot)) {
       const skippedResult: NormalisedResult = {
         schemaVersion: 'aqg.result.v1',
@@ -133,15 +173,7 @@ export async function runQualityAudit(options: AuditOptions = {}): Promise<Norma
         projectRoot,
         status: 'skipped_unchanged',
         reason: 'No changes detected in working tree since the last passed audit',
-        plan: {
-          projectId,
-          projectName,
-          projectRoot: appDir,
-          projectType: detected.type,
-          isWeb: true,
-          targets: [],
-          applicableProviders: ['lighthouse']
-        },
+        plan,
         observations: [],
         topIssues: [],
         findings: [],
@@ -157,55 +189,12 @@ export async function runQualityAudit(options: AuditOptions = {}): Promise<Norma
       return skippedResult;
     }
 
-    // 5. Route Discovery
-    const outputDir = config.outputDir || detected.framework?.outputDir || 'dist';
-    const discoveredRoutes = resolveRoutes({
-      configRoutes: config.routes,
-      sampleRoutes: config.sampleRoutes,
-      excludeRoutes: config.excludeRoutes,
-      projectRoot: appDir,
-      outputDir,
-      mode: options.mode || 'sample'
-    });
-
-    const profiles: Array<'mobile' | 'desktop'> = config.profiles || ['mobile', 'desktop'];
-    const runs = config.runs || 3;
-
-    const targets: TargetPlan[] = discoveredRoutes.map((route) => ({
-      route,
-      profiles,
-      runs
-    }));
-
-    // 6. Build the Audit Plan
-    const plan: AuditPlan = {
-      projectId,
-      projectName,
-      projectRoot: appDir,
-      projectType: detected.type,
-      isWeb: true,
-      previewCommand: config.previewCommand || detected.framework?.defaultPreviewCommand,
-      previewUrl: config.previewUrl,
-      outputDir,
-      targets,
-      applicableProviders: [],
-      configSource: config._source
-    };
-
-    // 7. Initialize Providers
-    const providers: QualityProvider[] = [
-      new LighthouseProvider(),
-      new ArchitectureHealthProvider(config.architecture)
-    ];
-    const activeProviders = providers.filter((p) => p.isApplicable(plan));
-    plan.applicableProviders = activeProviders.map((p) => p.id);
-
     // 8. Start Preview Server & Launch Chrome (only if required by active providers)
     let serverHandle: { url: string; attached: boolean; stop: () => Promise<void> } | null = null;
     let chromeHandle: { port: number; kill: () => Promise<void> } | null = null;
 
-    const needsServer = activeProviders.some((p) => p.getCapabilities().requiresServer !== false);
-    const needsBrowser = activeProviders.some((p) => p.getCapabilities().requiresBrowser !== false);
+    const needsServer = activeProviders.some((p) => p.getCapabilities().requiresServer === true);
+    const needsBrowser = activeProviders.some((p) => p.getCapabilities().requiresBrowser === true);
 
     try {
       if (needsServer) {
