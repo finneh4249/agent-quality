@@ -8,7 +8,9 @@
   },
   "main": "./src/index.js",
   "scripts": {
-    "test": "node --test test/*.test.js"
+    "build": "tsc",
+    "test": "node --test test/*.test.js",
+    "prepublishOnly": "npm run build && npm test"
   },
   "keywords": [
     "lighthouse",
