@@ -64,6 +64,7 @@ export async function runQualityAudit(options: AuditOptions = {}): Promise<Norma
       },
       observations: [],
       topIssues: [],
+      findings: [],
       reportPaths: {},
       environment: {
         nodeVersion: process.version,
@@ -105,6 +106,7 @@ export async function runQualityAudit(options: AuditOptions = {}): Promise<Norma
         },
         observations: [],
         topIssues: [],
+        findings: [],
         reportPaths: {},
         environment: {
           nodeVersion: process.version,
@@ -136,6 +138,7 @@ export async function runQualityAudit(options: AuditOptions = {}): Promise<Norma
         },
         observations: [],
         topIssues: [],
+        findings: [],
         reportPaths: {},
         environment: {
           nodeVersion: process.version,
@@ -219,25 +222,33 @@ export async function runQualityAudit(options: AuditOptions = {}): Promise<Norma
       // 9. Execute Providers
       const allObservations: ProviderObservation[] = [];
       const htmlReports: Record<string, string> = {};
+      const rawJsonReports: Record<string, string> = {};
       const allIssues: ActionableIssue[] = [];
+      const allFindingsList: any[] = [];
 
       for (const target of targets) {
         for (const provider of activeProviders) {
           const obsList = await provider.execute(target, context);
           for (const obs of obsList) {
             allObservations.push(obs);
+            const key = `${target.route.replace(/[/\\?%*:|"<>]/g, '_') || 'index'}_${obs.profile || 'default'}`;
             if (obs.rawArtifacts?.html) {
-              const key = `${target.route.replace(/[/\\?%*:|"<>]/g, '_') || 'index'}_${obs.profile || 'default'}`;
               htmlReports[key] = obs.rawArtifacts.html;
+            }
+            if (obs.rawArtifacts?.json) {
+              rawJsonReports[key] = obs.rawArtifacts.json;
             }
             if (obs.issues) {
               allIssues.push(...obs.issues);
+            }
+            if (obs.findings) {
+              allFindingsList.push(...obs.findings);
             }
           }
         }
       }
 
-      // Deduplicate issues
+      // Deduplicate issues and findings
       const issueMap = new Map<string, ActionableIssue>();
       for (const issue of allIssues) {
         if (!issueMap.has(issue.id) || issueMap.get(issue.id)!.score > issue.score) {
@@ -245,6 +256,14 @@ export async function runQualityAudit(options: AuditOptions = {}): Promise<Norma
         }
       }
       const topIssues = Array.from(issueMap.values()).slice(0, 5);
+
+      const findingMap = new Map<string, any>();
+      for (const finding of allFindingsList) {
+        if (!findingMap.has(finding.id) || (findingMap.get(finding.id).score || 0) > (finding.score || 0)) {
+          findingMap.set(finding.id, finding);
+        }
+      }
+      const topFindings = Array.from(findingMap.values()).slice(0, 8);
 
       // 10. Load Baseline if present or requested
       let baselinePath: string | null = null;
@@ -278,9 +297,11 @@ export async function runQualityAudit(options: AuditOptions = {}): Promise<Norma
           status: evaluation.status,
           evaluation,
           topIssues,
+          findings: topFindings,
           observations: allObservations
         },
-        htmlReports
+        htmlReports,
+        rawJsonReports
       );
 
       const normalisedResult: NormalisedResult = {
@@ -294,6 +315,7 @@ export async function runQualityAudit(options: AuditOptions = {}): Promise<Norma
         observations: allObservations,
         evaluation,
         topIssues,
+        findings: topFindings,
         reportPaths,
         baselinePath: baselinePath || (storedBaseline ? path.join(os.homedir(), '.agent-quality', 'baselines', `${projectId}.json`) : null),
         environment: {
@@ -338,6 +360,7 @@ export async function runQualityAudit(options: AuditOptions = {}): Promise<Norma
       },
       observations: [],
       topIssues: [],
+      findings: [],
       reportPaths: {},
       environment: {
         nodeVersion: process.version,

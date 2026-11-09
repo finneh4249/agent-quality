@@ -4,6 +4,8 @@ import {
   ProviderCapabilities,
   ProviderObservation,
   ActionableIssue,
+  ActionableFinding,
+  FindingSeverity,
   AuditPlan,
   TargetPlan,
   ExecutionContext
@@ -17,6 +19,83 @@ export function calculateMedian(numbers: number[]): number {
     return (sorted[mid - 1] + sorted[mid]) / 2;
   }
   return sorted[mid];
+}
+
+export function extractActionableFindings(lhr: any): ActionableFinding[] {
+  const findings: ActionableFinding[] = [];
+  const audits = lhr.audits || {};
+  const categories = lhr.categories || {};
+
+  // Build auditId -> category & weight mapping
+  const auditMeta = new Map<string, { category: string; weight: number }>();
+  for (const [catKey, catObj] of Object.entries<any>(categories)) {
+    for (const ref of catObj.auditRefs || []) {
+      auditMeta.set(ref.id, {
+        category: catKey,
+        weight: typeof ref.weight === 'number' ? ref.weight : 1
+      });
+    }
+  }
+
+  for (const [id, audit] of Object.entries<any>(audits)) {
+    if (
+      audit.score !== null &&
+      audit.score < 1 &&
+      audit.scoreDisplayMode !== 'notApplicable' &&
+      audit.scoreDisplayMode !== 'informative'
+    ) {
+      const meta = auditMeta.get(id) || { category: 'other', weight: 0 };
+      const scoreNum = Math.round((audit.score || 0) * 100);
+
+      let severity: FindingSeverity = 'warning';
+      if (audit.score === 0 && meta.weight > 0) {
+        severity = 'failure';
+      } else if (meta.weight === 0 || audit.scoreDisplayMode === 'informative') {
+        severity = 'info';
+      }
+
+      // Extract DOM element snippet/selector if present
+      let element: string | undefined;
+      let url: string | undefined;
+      const items = Array.isArray(audit.details?.items) ? audit.details.items : [];
+      for (const item of items) {
+        if (!element && item.node) {
+          element = item.node.snippet || item.node.selector || item.node.nodeLabel;
+        }
+        if (!url && item.url) {
+          url = item.url;
+        }
+      }
+
+      const explanation = audit.description ? audit.description.split('.')[0] + '.' : undefined;
+
+      findings.push({
+        id,
+        title: audit.title,
+        category: meta.category,
+        severity,
+        score: scoreNum,
+        weight: meta.weight,
+        description: audit.description || '',
+        explanation,
+        element,
+        url,
+        savings: audit.numericValue || 0,
+        displayValue: audit.displayValue || '',
+        details: items.slice(0, 5)
+      });
+    }
+  }
+
+  // Sort: failures first, then highest weight / savings
+  findings.sort((a, b) => {
+    if (a.severity === 'failure' && b.severity !== 'failure') return -1;
+    if (b.severity === 'failure' && a.severity !== 'failure') return 1;
+    if ((b.weight || 0) !== (a.weight || 0)) return (b.weight || 0) - (a.weight || 0);
+    return (a.score || 0) - (b.score || 0);
+  });
+
+  return findings;
 }
 
 export function extractActionableIssues(lhr: any): ActionableIssue[] {
@@ -78,7 +157,14 @@ export class LighthouseProvider implements QualityProvider {
     profile: 'mobile' | 'desktop';
     port: number;
     headers?: Record<string, string>;
-  }): Promise<{ scores: Record<string, number>; lhr: any; htmlReport: string; issues: ActionableIssue[] }> {
+  }): Promise<{
+    scores: Record<string, number>;
+    lhr: any;
+    htmlReport: string;
+    rawJsonReport: string;
+    findings: ActionableFinding[];
+    issues: ActionableIssue[];
+  }> {
     const isDesktop = profile === 'desktop';
 
     const desktopConfig = {
@@ -153,10 +239,16 @@ export class LighthouseProvider implements QualityProvider {
       ? runnerResult.report.find((r) => r.startsWith('<!doctype') || r.startsWith('<html')) || ''
       : runnerResult.report || '';
 
+    const rawJsonReport = typeof runnerResult.report === 'string' && runnerResult.report.startsWith('{')
+      ? runnerResult.report
+      : JSON.stringify(lhr);
+
     return {
       scores,
       lhr,
       htmlReport,
+      rawJsonReport,
+      findings: extractActionableFindings(lhr),
       issues: extractActionableIssues(lhr)
     };
   }
@@ -175,7 +267,9 @@ export class LighthouseProvider implements QualityProvider {
       };
 
       let bestHtmlReport = '';
+      let bestJsonReport = '';
       let topIssues: ActionableIssue[] = [];
+      let topFindings: ActionableFinding[] = [];
 
       for (let i = 0; i < target.runs; i++) {
         const runRes = await this.runSingleAudit({
@@ -191,7 +285,9 @@ export class LighthouseProvider implements QualityProvider {
 
         if (i === Math.floor(target.runs / 2) || !bestHtmlReport) {
           bestHtmlReport = runRes.htmlReport;
+          bestJsonReport = runRes.rawJsonReport;
           topIssues = runRes.issues;
+          topFindings = runRes.findings;
         }
       }
 
@@ -208,9 +304,11 @@ export class LighthouseProvider implements QualityProvider {
         target: target.route,
         profile,
         metrics: medians,
+        findings: topFindings,
         issues: topIssues,
         rawArtifacts: {
-          html: bestHtmlReport
+          html: bestHtmlReport,
+          json: bestJsonReport
         },
         durationMs: Date.now() - startTime
       });

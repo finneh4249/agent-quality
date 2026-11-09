@@ -48,7 +48,18 @@ export function createMarkdownReport(result: NormalisedResult): string {
     }
   }
 
-  if (result.topIssues && result.topIssues.length > 0) {
+  if (result.findings && result.findings.length > 0) {
+    lines.push('## Actionable Findings');
+    lines.push('');
+    for (const f of result.findings) {
+      lines.push(`### [${f.severity.toUpperCase()}] ${f.title} (${f.category})`);
+      if (f.score !== null) lines.push(`- **Score**: ${f.score}/100 (Weight: ${f.weight || 0})`);
+      if (f.element) lines.push(`- **Element**: \`${f.element}\``);
+      if (f.url) lines.push(`- **URL**: \`${f.url}\``);
+      if (f.explanation) lines.push(`- **Explanation**: ${f.explanation}`);
+      lines.push('');
+    }
+  } else if (result.topIssues && result.topIssues.length > 0) {
     lines.push('## Actionable Issues');
     lines.push('');
     for (const issue of result.topIssues) {

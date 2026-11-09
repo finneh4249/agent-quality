@@ -25,8 +25,9 @@ export function getProjectIdentifier(projectRoot: string): string {
 export function saveReport(
   projectId: string,
   reportData: unknown,
-  htmlReports: Record<string, string> = {}
-): { jsonPath: string; latestJsonPath: string; htmlPaths: Record<string, string> } {
+  htmlReports: Record<string, string> = {},
+  rawJsonReports: Record<string, string> = {}
+): { jsonPath: string; latestJsonPath: string; htmlPaths: Record<string, string>; rawJsonPaths: Record<string, string> } {
   ensureDirectories();
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const projectReportsDir = path.join(REPORTS_DIR, projectId);
@@ -48,10 +49,20 @@ export function saveReport(
     savedHtmlPaths[routeName] = htmlPath;
   }
 
+  const savedRawJsonPaths: Record<string, string> = {};
+  for (const [routeName, rawContent] of Object.entries(rawJsonReports)) {
+    const safeRoute = routeName.replace(/[^a-zA-Z0-9_-]/g, '_') || 'index';
+    const rawFilename = `report-${timestamp}-${safeRoute}-raw.json`;
+    const rawPath = path.join(projectReportsDir, rawFilename);
+    fs.writeFileSync(rawPath, rawContent, 'utf8');
+    savedRawJsonPaths[routeName] = rawPath;
+  }
+
   return {
     jsonPath,
     latestJsonPath,
-    htmlPaths: savedHtmlPaths
+    htmlPaths: savedHtmlPaths,
+    rawJsonPaths: savedRawJsonPaths
   };
 }
 

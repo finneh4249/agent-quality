@@ -4,6 +4,24 @@
 
 export type ProjectFrameworkType = 'astro' | 'vite' | 'next' | 'nuxt' | 'sveltekit' | 'static' | 'generic_web' | 'non_web';
 
+export type FindingSeverity = 'failure' | 'warning' | 'info';
+
+export interface ActionableFinding {
+  id: string;
+  title: string;
+  category: string;
+  severity: FindingSeverity;
+  score: number | null;
+  weight?: number;
+  description: string;
+  explanation?: string;
+  element?: string;
+  url?: string;
+  savings?: number;
+  displayValue?: string;
+  details?: unknown[];
+}
+
 export interface ActionableIssue {
   id: string;
   title: string;
@@ -66,6 +84,7 @@ export interface ProviderObservation {
   target: string;
   profile?: 'mobile' | 'desktop';
   metrics: Record<string, number>; // e.g. { performance: 92.0, accessibility: 98.0 }
+  findings: ActionableFinding[];
   issues: ActionableIssue[];
   rawArtifacts?: Record<string, string>; // path to HTML / JSON reports
   durationMs: number;
@@ -139,6 +158,7 @@ export interface NormalisedResult {
   observations: ProviderObservation[];
   evaluation?: PolicyEvaluationResult;
   topIssues: ActionableIssue[];
+  findings: ActionableFinding[];
   reportPaths: {
     jsonPath?: string;
     latestJsonPath?: string;
