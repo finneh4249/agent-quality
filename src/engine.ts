@@ -28,6 +28,7 @@ import {
   shouldSkipUnchanged,
   recordRunCompletion
 } from './adapters/hook-guard.js';
+import { getGitMetadata } from './environment/git.js';
 
 export interface AuditOptions {
   projectRoot?: string;
@@ -42,6 +43,7 @@ export async function runQualityAudit(options: AuditOptions = {}): Promise<Norma
   const projectRoot = path.resolve(options.projectRoot || process.cwd());
   const projectId = getProjectIdentifier(projectRoot);
   const projectName = path.basename(projectRoot);
+  const gitMeta = getGitMetadata(projectRoot);
 
   // 1. Guard against recursive execution
   if (isRecursiveExecution()) {
@@ -110,7 +112,10 @@ export async function runQualityAudit(options: AuditOptions = {}): Promise<Norma
         reportPaths: {},
         environment: {
           nodeVersion: process.version,
-          platform: process.platform
+          platform: process.platform,
+          gitSha: gitMeta?.revision,
+          gitBranch: gitMeta?.branch,
+          isDirty: gitMeta?.isDirty
         }
       };
       recordRunCompletion(projectRoot, 'not_applicable');
@@ -142,7 +147,10 @@ export async function runQualityAudit(options: AuditOptions = {}): Promise<Norma
         reportPaths: {},
         environment: {
           nodeVersion: process.version,
-          platform: process.platform
+          platform: process.platform,
+          gitSha: gitMeta?.revision,
+          gitBranch: gitMeta?.branch,
+          isDirty: gitMeta?.isDirty
         }
       };
       return skippedResult;
@@ -320,7 +328,10 @@ export async function runQualityAudit(options: AuditOptions = {}): Promise<Norma
         baselinePath: baselinePath || (storedBaseline ? path.join(os.homedir(), '.agent-quality', 'baselines', `${projectId}.json`) : null),
         environment: {
           nodeVersion: process.version,
-          platform: process.platform
+          platform: process.platform,
+          gitSha: gitMeta?.revision,
+          gitBranch: gitMeta?.branch,
+          isDirty: gitMeta?.isDirty
         }
       };
 

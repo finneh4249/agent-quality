@@ -169,5 +169,7 @@ export interface NormalisedResult {
     nodeVersion: string;
     platform: string;
     gitSha?: string;
+    gitBranch?: string;
+    isDirty?: boolean;
   };
 }

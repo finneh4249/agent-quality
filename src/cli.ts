@@ -8,6 +8,10 @@ import { createNormalisedResultJson } from './reporting/json.js';
 import { createMarkdownReport } from './reporting/markdown.js';
 import { findChrome } from './environment/chrome.js';
 import { ADAPTERS, fallbackGuide } from './adapters/index.js';
+import { createIsolatedWorktree } from './environment/git.js';
+import { compareAudits } from './policy/comparator.js';
+import { printComparisonReport } from './reporting/comparison.js';
+import { loadBaseline } from './storage/store.js';
 
 export function createCli(): Command {
   const program = new Command();
@@ -54,7 +58,102 @@ export function createCli(): Command {
       process.exit(isPassing ? 0 : 1);
     });
 
-  // Command: baseline
+  // Command: compare
+  program
+    .command('compare [rev1] [rev2]')
+    .description('Compare quality findings and scores between revisions or against a saved baseline')
+    .option('-p, --project <path>', 'Path to project root directory', process.cwd())
+    .option('-r, --runs <number>', 'Number of audit runs per route profile', '1')
+    .action(async (rev1, rev2, options) => {
+      const projectRoot = path.resolve(options.project);
+      const runs = parseInt(options.runs, 10) || 1;
+
+      console.log(pc.cyan(`\nInitiating quality gate comparison for ${projectRoot}...`));
+
+      if (rev1 && rev2) {
+        // Compare two revisions
+        console.log(pc.dim(`Preparing isolated checkouts for ${rev1} and ${rev2}...`));
+        const wt1 = createIsolatedWorktree(projectRoot, rev1);
+        let res1: any = null;
+        let res2: any = null;
+        try {
+          res1 = await runQualityAudit({ projectRoot: wt1.worktreePath, inlineConfig: { runs } });
+        } finally {
+          wt1.cleanup();
+        }
+
+        const wt2 = createIsolatedWorktree(projectRoot, rev2);
+        try {
+          res2 = await runQualityAudit({ projectRoot: wt2.worktreePath, inlineConfig: { runs } });
+        } finally {
+          wt2.cleanup();
+        }
+
+        const comparison = compareAudits(res1, res2);
+        printComparisonReport(comparison);
+        process.exit(comparison.hasRegressions ? 1 : 0);
+      } else if (rev1) {
+        // Compare working tree against rev1
+        console.log(pc.dim(`Auditing current working tree...`));
+        const currentRes = await runQualityAudit({ projectRoot, inlineConfig: { runs } });
+
+        console.log(pc.dim(`Preparing isolated checkout for revision ${rev1}...`));
+        const wt = createIsolatedWorktree(projectRoot, rev1);
+        let baseRes: any = null;
+        try {
+          baseRes = await runQualityAudit({ projectRoot: wt.worktreePath, inlineConfig: { runs } });
+        } finally {
+          wt.cleanup();
+        }
+
+        const comparison = compareAudits(baseRes, currentRes);
+        printComparisonReport(comparison);
+        process.exit(comparison.hasRegressions ? 1 : 0);
+      } else {
+        // Compare current working tree against saved baseline
+        console.log(pc.dim(`Auditing current working tree...`));
+        const currentRes = await runQualityAudit({ projectRoot, inlineConfig: { runs } });
+
+        const { getProjectIdentifier } = await import('./storage/store.js');
+        const projectId = getProjectIdentifier(projectRoot);
+        const savedBaseline = loadBaseline(projectId);
+
+        if (!savedBaseline) {
+          console.error(pc.yellow(`\nNo baseline found for ${projectRoot}. Run 'agent-quality baseline' first.\n`));
+          process.exit(1);
+        }
+
+        // Convert stored baseline into minimal NormalisedResult for comparison
+        const baseResult: any = {
+          schemaVersion: 'aqg.result.v1',
+          timestamp: savedBaseline.timestamp,
+          projectId,
+          projectName: path.basename(projectRoot),
+          projectRoot,
+          status: 'passed',
+          plan: savedBaseline.plan || currentRes.plan,
+          observations: savedBaseline.observations || [],
+          evaluation: {
+            routeSummaries: (savedBaseline.observations || []).map((o: any) => ({
+              route: o.target,
+              profiles: {
+                [o.profile || 'mobile']: Object.fromEntries(
+                  Object.entries(o.metrics || {}).map(([k, v]) => [k, { score: v }])
+                )
+              }
+            }))
+          },
+          findings: (savedBaseline.observations || []).flatMap((o: any) => o.findings || []),
+          topIssues: [],
+          reportPaths: {},
+          environment: {}
+        };
+
+        const comparison = compareAudits(baseResult, currentRes);
+        printComparisonReport(comparison);
+        process.exit(comparison.hasRegressions ? 1 : 0);
+      }
+    });
   program
     .command('baseline')
     .description('Run audit and record current scores as the project baseline')
