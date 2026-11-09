@@ -1,0 +1,351 @@
+import path from 'node:path';
+import os from 'node:os';
+import fs from 'node:fs';
+import { loadConfig, AgentQualityConfig } from './config.js';
+import { detectFramework } from './discovery/detector.js';
+import { resolveRoutes } from './discovery/routes.js';
+import { launchHeadlessChrome } from './environment/chrome.js';
+import { startPreviewServer } from './environment/server.js';
+import { LighthouseProvider } from './providers/lighthouse.js';
+import { PolicyEngine } from './policy/engine.js';
+import {
+  AuditPlan,
+  TargetPlan,
+  ExecutionContext,
+  NormalisedResult,
+  QualityProvider,
+  ProviderObservation,
+  ActionableIssue
+} from './types.js';
+import {
+  getProjectIdentifier,
+  saveReport,
+  saveBaseline,
+  loadBaseline
+} from './storage/store.js';
+import {
+  isRecursiveExecution,
+  shouldSkipUnchanged,
+  recordRunCompletion
+} from './adapters/hook-guard.js';
+
+export interface AuditOptions {
+  projectRoot?: string;
+  mode?: 'sample' | 'changed' | 'all';
+  recordBaseline?: boolean;
+  inlineConfig?: Partial<AgentQualityConfig>;
+  isHookExecution?: boolean;
+  agentName?: string;
+}
+
+export async function runQualityAudit(options: AuditOptions = {}): Promise<NormalisedResult> {
+  const projectRoot = path.resolve(options.projectRoot || process.cwd());
+  const projectId = getProjectIdentifier(projectRoot);
+  const projectName = path.basename(projectRoot);
+
+  // 1. Guard against recursive execution
+  if (isRecursiveExecution()) {
+    const skippedResult: NormalisedResult = {
+      schemaVersion: 'aqg.result.v1',
+      timestamp: new Date().toISOString(),
+      projectId,
+      projectName,
+      projectRoot,
+      status: 'skipped_unchanged',
+      reason: 'Recursive agent quality gate invocation prevented',
+      plan: {
+        projectId,
+        projectName,
+        projectRoot,
+        projectType: 'non_web',
+        isWeb: false,
+        targets: [],
+        applicableProviders: []
+      },
+      observations: [],
+      topIssues: [],
+      reportPaths: {},
+      environment: {
+        nodeVersion: process.version,
+        platform: process.platform
+      }
+    };
+    return skippedResult;
+  }
+
+  // Set recursion guard
+  process.env.AGENT_QUALITY_RUNNING = '1';
+
+  try {
+    // 2. Load configuration & policy
+    const { config, policy } = await loadConfig(projectRoot, options.inlineConfig || {});
+    const appDir = config.appDir ? path.resolve(projectRoot, config.appDir) : projectRoot;
+
+    // 3. Project & Framework Discovery
+    const detected = detectFramework(appDir);
+
+    // If non-web project, return not_applicable immediately (Exit 0)
+    if (!detected.isWeb || detected.type === 'non_web') {
+      const naResult: NormalisedResult = {
+        schemaVersion: 'aqg.result.v1',
+        timestamp: new Date().toISOString(),
+        projectId,
+        projectName,
+        projectRoot,
+        status: 'not_applicable',
+        reason: detected.reason || 'Non-web project: no frontend web interface or static HTML detected',
+        plan: {
+          projectId,
+          projectName,
+          projectRoot: appDir,
+          projectType: 'non_web',
+          isWeb: false,
+          targets: [],
+          applicableProviders: []
+        },
+        observations: [],
+        topIssues: [],
+        reportPaths: {},
+        environment: {
+          nodeVersion: process.version,
+          platform: process.platform
+        }
+      };
+      recordRunCompletion(projectRoot, 'not_applicable');
+      return naResult;
+    }
+
+    // 4. Hook Deduplication Guard: Check if working tree unchanged since last passed run
+    if (options.isHookExecution && shouldSkipUnchanged(projectRoot)) {
+      const skippedResult: NormalisedResult = {
+        schemaVersion: 'aqg.result.v1',
+        timestamp: new Date().toISOString(),
+        projectId,
+        projectName,
+        projectRoot,
+        status: 'skipped_unchanged',
+        reason: 'No changes detected in working tree since the last passed audit',
+        plan: {
+          projectId,
+          projectName,
+          projectRoot: appDir,
+          projectType: detected.type,
+          isWeb: true,
+          targets: [],
+          applicableProviders: ['lighthouse']
+        },
+        observations: [],
+        topIssues: [],
+        reportPaths: {},
+        environment: {
+          nodeVersion: process.version,
+          platform: process.platform
+        }
+      };
+      return skippedResult;
+    }
+
+    // 5. Route Discovery
+    const outputDir = config.outputDir || detected.framework?.outputDir || 'dist';
+    const discoveredRoutes = resolveRoutes({
+      configRoutes: config.routes,
+      sampleRoutes: config.sampleRoutes,
+      excludeRoutes: config.excludeRoutes,
+      projectRoot: appDir,
+      outputDir,
+      mode: options.mode || 'sample'
+    });
+
+    const profiles: Array<'mobile' | 'desktop'> = config.profiles || ['mobile', 'desktop'];
+    const runs = config.runs || 3;
+
+    const targets: TargetPlan[] = discoveredRoutes.map((route) => ({
+      route,
+      profiles,
+      runs
+    }));
+
+    // 6. Build the Audit Plan
+    const plan: AuditPlan = {
+      projectId,
+      projectName,
+      projectRoot: appDir,
+      projectType: detected.type,
+      isWeb: true,
+      previewCommand: config.previewCommand || detected.framework?.defaultPreviewCommand,
+      previewUrl: config.previewUrl,
+      outputDir,
+      targets,
+      applicableProviders: ['lighthouse'],
+      configSource: config._source
+    };
+
+    // 7. Initialize Providers
+    const providers: QualityProvider[] = [new LighthouseProvider()];
+    const activeProviders = providers.filter((p) => p.isApplicable(plan));
+
+    // 8. Start Preview Server & Launch Chrome
+    let serverHandle: { url: string; attached: boolean; stop: () => Promise<void> } | null = null;
+    let chromeHandle: { port: number; kill: () => Promise<void> } | null = null;
+
+    try {
+      serverHandle = await startPreviewServer({
+        projectRoot: appDir,
+        previewCommand: plan.previewCommand,
+        previewUrl: plan.previewUrl,
+        defaultPort: detected.framework?.defaultPort || 4173,
+        outputDir,
+        env: config.env
+      });
+
+      chromeHandle = await launchHeadlessChrome();
+
+      const context: ExecutionContext = {
+        projectRoot: appDir,
+        baseUrl: serverHandle.url,
+        chrome: chromeHandle,
+        tempDir: fs.mkdtempSync(path.join(os.tmpdir(), 'aqg-')),
+        auth: {
+          headers: config.auth?.headers || {},
+          cookies: config.auth?.cookies || []
+        },
+        env: config.env || {},
+        timeouts: {
+          serverStartMs: 30000,
+          auditTimeoutMs: 60000
+        }
+      };
+
+      // 9. Execute Providers
+      const allObservations: ProviderObservation[] = [];
+      const htmlReports: Record<string, string> = {};
+      const allIssues: ActionableIssue[] = [];
+
+      for (const target of targets) {
+        for (const provider of activeProviders) {
+          const obsList = await provider.execute(target, context);
+          for (const obs of obsList) {
+            allObservations.push(obs);
+            if (obs.rawArtifacts?.html) {
+              const key = `${target.route.replace(/[/\\?%*:|"<>]/g, '_') || 'index'}_${obs.profile || 'default'}`;
+              htmlReports[key] = obs.rawArtifacts.html;
+            }
+            if (obs.issues) {
+              allIssues.push(...obs.issues);
+            }
+          }
+        }
+      }
+
+      // Deduplicate issues
+      const issueMap = new Map<string, ActionableIssue>();
+      for (const issue of allIssues) {
+        if (!issueMap.has(issue.id) || issueMap.get(issue.id)!.score > issue.score) {
+          issueMap.set(issue.id, issue);
+        }
+      }
+      const topIssues = Array.from(issueMap.values()).slice(0, 5);
+
+      // 10. Load Baseline if present or requested
+      let baselinePath: string | null = null;
+      const storedBaseline = loadBaseline(projectId);
+
+      // 11. Policy Evaluation
+      const policyEngine = new PolicyEngine(policy);
+      const evaluation = policyEngine.evaluate(allObservations, storedBaseline?.observations || []);
+
+      // If user requested `agent-quality baseline`, save current as baseline
+      if (options.recordBaseline) {
+        baselinePath = saveBaseline(projectId, {
+          projectId,
+          projectName,
+          projectRoot: appDir,
+          observations: allObservations,
+          plan
+        });
+      }
+
+      // 12. Save Reports externally in ~/.agent-quality/reports/
+      const reportPaths = saveReport(
+        projectId,
+        {
+          schemaVersion: 'aqg.result.v1',
+          timestamp: new Date().toISOString(),
+          projectId,
+          projectName,
+          projectRoot: appDir,
+          plan,
+          status: evaluation.status,
+          evaluation,
+          topIssues,
+          observations: allObservations
+        },
+        htmlReports
+      );
+
+      const normalisedResult: NormalisedResult = {
+        schemaVersion: 'aqg.result.v1',
+        timestamp: new Date().toISOString(),
+        projectId,
+        projectName,
+        projectRoot: appDir,
+        status: evaluation.status,
+        plan,
+        observations: allObservations,
+        evaluation,
+        topIssues,
+        reportPaths,
+        baselinePath: baselinePath || (storedBaseline ? path.join(os.homedir(), '.agent-quality', 'baselines', `${projectId}.json`) : null),
+        environment: {
+          nodeVersion: process.version,
+          platform: process.platform
+        }
+      };
+
+      // Record run state for hook deduplication
+      recordRunCompletion(projectRoot, evaluation.status, {
+        passed: evaluation.passed,
+        failuresCount: evaluation.failures.length,
+        warningsCount: evaluation.warnings.length
+      });
+
+      return normalisedResult;
+    } finally {
+      if (chromeHandle) {
+        await chromeHandle.kill();
+      }
+      if (serverHandle) {
+        await serverHandle.stop();
+      }
+    }
+  } catch (err: any) {
+    const errorResult: NormalisedResult = {
+      schemaVersion: 'aqg.result.v1',
+      timestamp: new Date().toISOString(),
+      projectId,
+      projectName,
+      projectRoot,
+      status: 'execution_failure',
+      reason: err.message || String(err),
+      plan: {
+        projectId,
+        projectName,
+        projectRoot,
+        projectType: 'generic_web',
+        isWeb: true,
+        targets: [],
+        applicableProviders: ['lighthouse']
+      },
+      observations: [],
+      topIssues: [],
+      reportPaths: {},
+      environment: {
+        nodeVersion: process.version,
+        platform: process.platform
+      }
+    };
+    return errorResult;
+  } finally {
+    delete process.env.AGENT_QUALITY_RUNNING;
+  }
+}
