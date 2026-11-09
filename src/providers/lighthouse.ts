@@ -139,12 +139,19 @@ export class LighthouseProvider implements QualityProvider {
     return {
       supportsMobile: true,
       supportsDesktop: true,
-      supportsMultiRun: true
+      supportsMultiRun: true,
+      requiresBrowser: true,
+      requiresServer: true,
+      scope: 'route'
     };
   }
 
   isApplicable(plan: AuditPlan): boolean {
-    return plan.isWeb && plan.projectType !== 'non_web';
+    return Boolean(
+      plan.isWeb &&
+      plan.projectType !== 'non_web' &&
+      (plan.previewCommand || plan.previewUrl || (plan.targets && plan.targets.length > 0))
+    );
   }
 
   async runSingleAudit({

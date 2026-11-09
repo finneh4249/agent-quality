@@ -206,7 +206,7 @@ export function detectFramework(projectRoot: string): DetectedProject {
     };
   }
 
-  // 7. Check if non-web project (CLI, backend worker, library, python, rust)
+  // 7. Check if non-web project (CLI, backend worker, library, python, rust, or no web interface)
   const isBackendOrCli = Boolean(
     pkg &&
     !pkg.dependencies?.react &&
@@ -219,11 +219,21 @@ export function detectFramework(projectRoot: string): DetectedProject {
   );
 
   const hasNoWebFiles = !fs.existsSync(path.join(projectRoot, 'index.html')) &&
+                        !fs.existsSync(path.join(projectRoot, 'public', 'index.html')) &&
                         !fs.existsSync(path.join(projectRoot, 'src', 'index.html')) &&
                         !fs.existsSync(path.join(projectRoot, 'pages')) &&
                         !fs.existsSync(path.join(projectRoot, 'src', 'pages'));
 
-  if (!pkg || (isBackendOrCli && hasNoWebFiles)) {
+  const hasNoWebDeps = !pkg?.dependencies?.react &&
+                       !pkg?.dependencies?.vue &&
+                       !pkg?.dependencies?.svelte &&
+                       !pkg?.devDependencies?.react &&
+                       !pkg?.devDependencies?.vue &&
+                       !pkg?.devDependencies?.svelte;
+
+  const hasNoPreviewScripts = !pkg?.scripts?.preview && !pkg?.scripts?.start && !pkg?.scripts?.serve;
+
+  if (!pkg || isBackendOrCli || (hasNoWebFiles && hasNoWebDeps && hasNoPreviewScripts)) {
     return {
       type: 'non_web',
       framework: null,
