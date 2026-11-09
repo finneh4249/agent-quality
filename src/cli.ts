@@ -390,6 +390,11 @@ export function createCli(): Command {
       if (result.components.singleUse.length > 0) {
         console.log(`  ${pc.dim('Single-Use Components:')} ${result.components.singleUse.length}`);
       }
+      if (result.components.newOrphaned && result.components.newOrphaned.length > 0) {
+        console.log(`  ${pc.yellow('Orphaned Components (New):')} ${result.components.newOrphaned.map((c) => c.relativePath).join(', ')}`);
+      } else if (result.components.orphaned && result.components.orphaned.length > 0) {
+        console.log(`  ${pc.dim('Orphaned Components (Total):')} ${result.components.orphaned.length}`);
+      }
       console.log(`  Dependency Changes: ${result.dependencies.length}`);
       console.log(`  Dependency Cycles: ${result.cycles.length}`);
       console.log(`  Subsystem Dispersion: ${Math.round(result.amplification.dispersionRatio * 100)}% (${result.amplification.outOfScopeFiles.length} out of primary scope)`);

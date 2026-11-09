@@ -39,6 +39,40 @@ export function scanComponentFiles(projectRoot: string): string[] {
   return components;
 }
 
+export function isEntrypoint(relPath: string): boolean {
+  const norm = relPath.replace(/\\/g, '/');
+
+  // Framework routed pages
+  if (
+    norm.startsWith('src/pages/') ||
+    norm.startsWith('pages/') ||
+    norm.startsWith('src/routes/') ||
+    norm.startsWith('routes/') ||
+    norm.startsWith('src/app/') ||
+    norm.startsWith('app/')
+  ) {
+    return true;
+  }
+
+  // Root entrypoint files
+  const base = path.basename(norm);
+  if (/^(index|main|cli|root|entry|server)\.[a-zA-Z]+$/.test(base)) {
+    return true;
+  }
+
+  // Content configurations
+  if (/content\.config\.[a-zA-Z]+$/.test(base)) {
+    return true;
+  }
+
+  // Test files
+  if (/\.(test|spec)\.[a-zA-Z]+$/.test(base) || norm.startsWith('test/') || norm.startsWith('tests/')) {
+    return true;
+  }
+
+  return false;
+}
+
 export function buildComponentGraph(
   projectRoot: string,
   gitDiff: GitDiffState
@@ -49,6 +83,8 @@ export function buildComponentGraph(
   modified: ComponentItem[];
   modularAbstractions: ComponentItem[];
   singleUse: ComponentItem[];
+  orphaned: ComponentItem[];
+  newOrphaned: ComponentItem[];
 } {
   const changedMap = new Map(gitDiff.changedFiles.map((c) => [c.relativePath, c.status]));
   const componentPaths = new Set(scanComponentFiles(projectRoot));
@@ -124,6 +160,7 @@ export function buildComponentGraph(
 
     const fanIn = consumers.size;
     const isModularAbstraction = isNew && fanIn >= 2;
+    const isOrphaned = !isDeleted && fanIn === 0 && !isEntrypoint(compRel);
 
     componentItems.push({
       path: path.join(projectRoot, compRel),
@@ -134,7 +171,8 @@ export function buildComponentGraph(
       isModified,
       fanIn,
       consumers: Array.from(consumers),
-      isModularAbstraction
+      isModularAbstraction,
+      isOrphaned
     });
   }
 
@@ -143,6 +181,8 @@ export function buildComponentGraph(
   const modified = componentItems.filter((c) => c.isModified);
   const modularAbstractions = added.filter((c) => c.isModularAbstraction);
   const singleUse = added.filter((c) => !c.isModularAbstraction && c.fanIn === 1);
+  const orphaned = componentItems.filter((c) => c.isOrphaned);
+  const newOrphaned = added.filter((c) => c.isOrphaned);
 
   return {
     allComponents: componentItems,
@@ -150,6 +190,8 @@ export function buildComponentGraph(
     deleted,
     modified,
     modularAbstractions,
-    singleUse
+    singleUse,
+    orphaned,
+    newOrphaned
   };
 }

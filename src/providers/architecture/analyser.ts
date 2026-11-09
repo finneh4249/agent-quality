@@ -130,6 +130,35 @@ export function runArchitectureAnalysis(
     });
   }
 
+  // E. Orphaned Code Facts
+  if (componentGraph.newOrphaned.length > 0) {
+    facts.push({
+      id: 'arch-new-orphaned-components',
+      title: `Orphaned Code: ${componentGraph.newOrphaned.length} new unreferenced component(s)`,
+      category: 'architecture',
+      severity: 'warning',
+      score: 70,
+      evidenceType: 'fact',
+      description: `Newly authored components have 0 consumers across the repository and are not entrypoints: ${componentGraph.newOrphaned.map((c) => c.relativePath).join(', ')}.`,
+      element: componentGraph.newOrphaned.map((c) => c.relativePath).join(', '),
+      details: componentGraph.newOrphaned
+    });
+  }
+
+  const existingOrphaned = componentGraph.orphaned.filter((c) => !c.isNew);
+  if (existingOrphaned.length > 0) {
+    facts.push({
+      id: 'arch-orphaned-components',
+      title: `Orphaned Code: ${existingOrphaned.length} unreferenced component(s)`,
+      category: 'architecture',
+      severity: 'info',
+      score: 85,
+      evidenceType: 'fact',
+      description: `Repository contains unreferenced components with 0 consumers: ${existingOrphaned.slice(0, 5).map((c) => c.relativePath).join(', ')}${existingOrphaned.length > 5 ? '...' : ''}.`,
+      details: existingOrphaned
+    });
+  }
+
   // --- Tier 2: Heuristics & Budget Enforcements ---
   // A. Structural Duplication
   for (const cluster of duplicationClusters) {
@@ -229,6 +258,19 @@ export function runArchitectureAnalysis(
         description: `Dispersion ratio (${amplification.dispersionRatio}) exceeds advisory budget of ${budgets.dispersionGrowth.warningThreshold}.`
       });
     }
+
+    if (budgets.orphanedCodeGrowth && componentGraph.newOrphaned.length >= budgets.orphanedCodeGrowth.warningThreshold) {
+      heuristics.push({
+        id: 'arch-budget-orphaned-growth',
+        title: `Architecture Budget Exceeded: Orphaned Code (+${componentGraph.newOrphaned.length})`,
+        category: 'architecture',
+        severity: 'warning',
+        score: 70,
+        evidenceType: 'heuristic',
+        description: `Newly introduced unreferenced component count (${componentGraph.newOrphaned.length}) exceeds advisory budget threshold of ${budgets.orphanedCodeGrowth.warningThreshold}.`,
+        explanation: 'Verify whether new components are missing import connections or represent dead code.'
+      });
+    }
   }
 
   // --- Tier 3: Advisory Remediation Findings (Section 14) ---
@@ -261,6 +303,7 @@ export function runArchitectureAnalysis(
   let structuralHealth = 100;
   structuralHealth -= duplicationClusters.length * 5;
   structuralHealth -= cycles.length * 10;
+  structuralHealth -= componentGraph.newOrphaned.length * 5;
   if (amplification.dispersionRatio > 0.3) structuralHealth -= 10;
   structuralHealth -= metadataDuplicates.length * 3;
   structuralHealth -= ruleWarnings.length * 5;
@@ -282,6 +325,7 @@ export function runArchitectureAnalysis(
       componentsDeleted: componentGraph.deleted.length,
       singleUseComponents: componentGraph.singleUse.length,
       modularAbstractions: componentGraph.modularAbstractions.length,
+      orphanedComponents: componentGraph.orphaned.length,
       structuralDuplicationRatio: duplicationClusters.length > 0 ? 0.85 : 0,
       dependencyCycles: cycles.length,
       dispersionRatio: amplification.dispersionRatio,
@@ -310,7 +354,9 @@ export function runArchitectureAnalysis(
       deleted: componentGraph.deleted,
       modified: componentGraph.modified,
       modularAbstractions: componentGraph.modularAbstractions,
-      singleUse: componentGraph.singleUse
+      singleUse: componentGraph.singleUse,
+      orphaned: componentGraph.orphaned,
+      newOrphaned: componentGraph.newOrphaned
     },
     dependencies,
     amplification,

@@ -28,6 +28,7 @@ export function evaluateRemediationStrategies({
   // 1. Check for Razing & Rebuild Signal:
   // Signals: High duplication across many components in the same subsystem, coupled with cycles or severe dispersion
   const subsystemComponents = components.filter((c) => matchesSubsystem(c.relativePath));
+  const orphanedInSubsystem = subsystemComponents.filter((c) => c.isOrphaned);
   const relatedClusters = duplicationClusters.filter((c) =>
     c.components.some((p) => matchesSubsystem(p))
   );
@@ -51,7 +52,10 @@ export function evaluateRemediationStrategies({
       whatShouldDisappear: [
         'Single-use wrapper component sprawl and hardcoded boilerplate templates',
         'Circular import bridges and ad-hoc compatibility adapters',
-        'Duplicate markup skeletons differing only by text literals'
+        'Duplicate markup skeletons differing only by text literals',
+        ...(orphanedInSubsystem.length > 0
+          ? [`${orphanedInSubsystem.length} unreferenced / orphaned component(s) (${orphanedInSubsystem.slice(0, 3).map((c) => c.relativePath).join(', ')})`]
+          : [])
       ],
       replacementStrategy: 'Parallel replacement: author a clean, data-driven replacement primitive, migrate consumer views to pass structured data, and then cleanly raze the obsolete wrapper files.',
       risks: [
@@ -70,7 +74,10 @@ export function evaluateRemediationStrategies({
         'Visual hierarchy and responsive layout behavior'
       ],
       whatShouldDisappear: [
-        'Near-identical template AST structures'
+        'Near-identical template AST structures',
+        ...(orphanedInSubsystem.length > 0
+          ? [`${orphanedInSubsystem.length} unreferenced / orphaned component(s) (${orphanedInSubsystem.slice(0, 3).map((c) => c.relativePath).join(', ')})`]
+          : [])
       ],
       replacementStrategy: 'Incremental refactoring: parameterize shared component props and replace duplicate templates in-place.',
       risks: [

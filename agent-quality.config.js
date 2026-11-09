@@ -86,7 +86,8 @@ export default {
       singleUseComponentGrowth: { warningThreshold: 5 },
       duplicationGrowth: { warningThreshold: 2 },
       dependencyCycleGrowth: { warningThreshold: 0 },
-      dispersionGrowth: { warningThreshold: 0.35 }
+      dispersionGrowth: { warningThreshold: 0.35 },
+      orphanedCodeGrowth: { warningThreshold: 1 }
     },
 
     exceptions: [

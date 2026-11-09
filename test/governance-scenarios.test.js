@@ -382,4 +382,56 @@ describe('AQG Self-Governance & 10 Architectural Scenarios Suite', () => {
     assert.ok(rec.risks.length >= 1);
     assert.match(rec.replacementStrategy, /Parallel replacement/i);
   });
+
+  // Scenario 12: Orphaned code detection & entrypoint protection
+  test('Scenario 12: Detects unreferenced / orphaned code while preserving routed entrypoints', () => {
+    fs.mkdirSync(path.join(tmpDir, 'src/components/orphan'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, 'src/pages'), { recursive: true });
+
+    // Base commit
+    fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({ name: 'orphan-test' }));
+    fs.writeFileSync(path.join(tmpDir, 'src/pages/index.astro'), '<div>Home Page Entrypoint</div>');
+    execSync('git add . && git commit -m "chore: base"', { cwd: tmpDir, stdio: 'ignore' });
+
+    // Add orphaned component that is never imported
+    fs.writeFileSync(
+      path.join(tmpDir, 'src/components/orphan/ForgottenCard.astro'),
+      '<div>Forgotten Card</div>'
+    );
+    // Add another routed page (should be recognized as entrypoint, not orphan)
+    fs.writeFileSync(
+      path.join(tmpDir, 'src/pages/about.astro'),
+      '<div>About Page Entrypoint</div>'
+    );
+
+    const result = runArchitectureAnalysis(tmpDir, {
+      budgets: {
+        orphanedCodeGrowth: { warningThreshold: 1 }
+      }
+    });
+
+    // 1. ForgottenCard is orphaned
+    assert.equal(result.components.orphaned.length, 1);
+    assert.equal(result.components.newOrphaned.length, 1);
+    assert.equal(result.components.newOrphaned[0].relativePath, 'src/components/orphan/ForgottenCard.astro');
+    assert.equal(result.components.newOrphaned[0].isOrphaned, true);
+
+    // 2. Fact finding emitted
+    const orphanFact = result.facts.find((f) => f.id === 'arch-new-orphaned-components');
+    assert.ok(orphanFact);
+    assert.match(orphanFact.description, /ForgottenCard\.astro/);
+    assert.equal(orphanFact.severity, 'warning');
+
+    // 3. Budget heuristic finding emitted
+    const budgetFinding = result.heuristics.find((f) => f.id === 'arch-budget-orphaned-growth');
+    assert.ok(budgetFinding);
+
+    // 4. Snapshot tracks orphaned components
+    assert.equal(result.snapshot.metrics.orphanedComponents, 1);
+
+    // 5. Entrypoints (pages/index.astro and pages/about.astro) are NOT orphaned
+    const indexComp = result.components.added.find((c) => c.relativePath === 'src/pages/about.astro');
+    assert.ok(indexComp);
+    assert.equal(indexComp.isOrphaned, false);
+  });
 });

@@ -152,12 +152,19 @@ Builds a directed module graph $G = (V, E)$ across the codebase.
 - Applies Depth-First Search with recursion stack tracking.
 - Identifies circular module imports (`A → B → C → A`), which break tree-shaking and complicate refactoring.
 
-### G. Architecture Health Budgets
+### G. Orphaned Code & Dead Component Detection
+Discovers unreferenced components and modules where consumer fan-in is 0 (`fanIn === 0`):
+- **Entrypoint Protection:** Protects routed page views (`src/pages/**`, `routes/**`, `app/**`), root files (`index`, `cli`, `main`, `server`), content collection configs, and test suites from being falsely flagged as orphans.
+- **Diff Attribution:** Distinguishes newly authored orphans (`newOrphaned`) created during the current change from pre-existing repository debt (`orphaned`).
+- **Targeted Removal:** Automatically injects detected orphans into the `whatShouldDisappear` remediation pillar for refactoring or subsystem razing.
+
+### H. Architecture Health Budgets
 Allows repositories to define advisory change budgets in `architecture.budgets`:
 - `singleUseComponentGrowth`: Flags bursts of unshared components.
 - `duplicationGrowth`: Flags new structural template duplication clusters.
 - `dependencyCycleGrowth`: Flags newly created circular dependencies.
 - `dispersionGrowth`: Flags cross-subsystem change leakage exceeding ratio thresholds.
+- `orphanedCodeGrowth`: Flags newly introduced unreferenced/dead components.
 
 ---
 

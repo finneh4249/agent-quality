@@ -36,6 +36,7 @@ export interface ArchitectureBudgetsConfig {
   duplicationGrowth?: ArchitectureBudgetThreshold;
   dependencyCycleGrowth?: ArchitectureBudgetThreshold;
   dispersionGrowth?: ArchitectureBudgetThreshold;
+  orphanedCodeGrowth?: ArchitectureBudgetThreshold;
 }
 
 export type RemediationStrategy = 'repair' | 'refactor' | 'raze_and_rebuild';
@@ -64,6 +65,7 @@ export interface ArchitectureSnapshot {
     componentsDeleted: number;
     singleUseComponents: number;
     modularAbstractions: number;
+    orphanedComponents: number;
     structuralDuplicationRatio: number;
     dependencyCycles: number;
     dispersionRatio: number;

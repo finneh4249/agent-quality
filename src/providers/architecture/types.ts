@@ -19,6 +19,7 @@ export interface ComponentItem {
   fanIn: number;
   consumers: string[];
   isModularAbstraction: boolean;
+  isOrphaned: boolean;
 }
 
 export interface DependencyDiffItem {
@@ -74,6 +75,8 @@ export interface ArchitectureAnalysisResult {
     modified: ComponentItem[];
     modularAbstractions: ComponentItem[];
     singleUse: ComponentItem[];
+    orphaned: ComponentItem[];
+    newOrphaned: ComponentItem[];
   };
   dependencies: DependencyDiffItem[];
   amplification: AmplificationReport;
