@@ -133,7 +133,7 @@ export interface NormalisedResult {
   projectId: string;
   projectName: string;
   projectRoot: string;
-  status: 'passed' | 'threshold_failure' | 'execution_failure' | 'not_applicable' | 'skipped_unchanged' | 'not_configured' | 'missing_dependency';
+  status: 'passed' | 'warning' | 'threshold_failure' | 'execution_failure' | 'not_applicable' | 'skipped_unchanged' | 'not_configured' | 'missing_dependency';
   reason?: string;
   plan: AuditPlan;
   observations: ProviderObservation[];

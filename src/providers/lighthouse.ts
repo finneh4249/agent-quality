@@ -123,7 +123,7 @@ export class LighthouseProvider implements QualityProvider {
       }
     };
 
-    const config = isDesktop ? desktopConfig : mobileConfig;
+    const config: any = isDesktop ? desktopConfig : mobileConfig;
 
     const runnerResult = await lighthouse(
       url,
