@@ -147,9 +147,122 @@ Scans Astro content collections (`src/content/**`) and data schemas for canonica
 Compares `dependencies` and `devDependencies` in `package.json` against the Git baseline.
 - Flags added packages, removals, and major/minor version increments.
 
+### F. Dependency Cycle Detection
+Builds a directed module graph $G = (V, E)$ across the codebase.
+- Applies Depth-First Search with recursion stack tracking.
+- Identifies circular module imports (`A → B → C → A`), which break tree-shaking and complicate refactoring.
+
+### G. Architecture Health Budgets
+Allows repositories to define advisory change budgets in `architecture.budgets`:
+- `singleUseComponentGrowth`: Flags bursts of unshared components.
+- `duplicationGrowth`: Flags new structural template duplication clusters.
+- `dependencyCycleGrowth`: Flags newly created circular dependencies.
+- `dispersionGrowth`: Flags cross-subsystem change leakage exceeding ratio thresholds.
+
 ---
 
-## 5. False-Positive Limitations & Mitigation
+## 5. Architectural Razing & Replacement Recommendations
+
+> **Do not be afraid to recommend a razing.**
+> *Technical debt is not inherently worth preserving merely because it already exists.*
+> Existing code is evidence of previous decisions, not proof that those decisions remain correct.
+> Preserve what is valuable, improve what is salvageable, and replace what is fundamentally unsound.
+
+AQG identifies situations where incremental refactoring is counterproductive:
+- Multiple layers of compatibility adapters exist solely to support obsolete decisions.
+- High modification friction: simple fixes require edits across 6+ unrelated files.
+- The comprehension tax of understanding legacy code exceeds clean rebuild costs.
+- Subsystem duplicates functionality already provided by modern platforms or libraries.
+- Knotted dependency cycles and repeated debt recreation.
+
+### Remediation Strategy Comparison
+
+| Strategy | Appropriate When | Key Indicators | Action |
+|---|---|---|---|
+| **Repair** | Architecture is fundamentally sound; defects are local. | Clear boundaries, low dispersion, passes tests with minor fixes. | Fix bug directly with local unit regression tests. |
+| **Refactor** | Architecture is salvageable but requires structural improvement. | Leaky abstractions, component duplication, or reuse friction. | Consolidate templates, parameterize props, preserve contracts. |
+| **Raze and Rebuild** | Preserving the existing implementation creates more ongoing complexity than replacement. | Knotted cycles, multiple wrapper layers, high duplication sprawl, $>35\%$ dispersion. | Cleanly raze subsystem, author data-driven replacement primitive, migrate views. |
+
+### The Six Pillars of a Razing Proposal
+1. **What should be replaced**: Clearly bounded component or subsystem.
+2. **Why**: Objective structural failure evidence (e.g. 19 single-use wrappers, 92% structural duplication, dependency cycles).
+3. **What should survive**: Behavioral contracts, domain knowledge, tests, schemas, interfaces.
+4. **What should disappear**: Redundant layers, obsolete compatibility, boilerplate duplication.
+5. **Replacement strategy**: Parallel replacement, clean rebuild, or incremental migration.
+6. **Risks & Mitigations**: Integration dependencies, behavioural regression risks, data migration limits.
+
+*Constraint: Razing recommendations are strictly advisory (`[ADVISORY]`). AQG never performs autonomous destruction.*
+
+---
+
+## 6. Longitudinal Architectural Health
+
+Longitudinal health tracks code maintainability trajectory across commits.
+
+### A. Architectural Snapshot Schema (`aqg.arch.snapshot.v1`)
+Snapshots capture:
+- Repository identifier & commit SHA.
+- Timestamp & analyser version.
+- Config fingerprint (hash of rules and budgets).
+- Aggregated metrics (total components, single-use count, duplication ratio, cycles, dispersion).
+- Stored locally in `~/.agent-quality/history/<projectId>.json`.
+
+### B. Trend & Comparability Analysis
+- Compares current commit metrics against the historical observation window.
+- Identifies whether structural duplication, coupling, or dispersion is **improving**, **degrading**, or **stable**.
+- **Comparability Guard**: If the analyser version or configuration changed between snapshots, AQG displays an explicit warning explaining that trend metrics may reflect rule modifications rather than true code drift.
+- **Differentiates**:
+  1. *Current change contribution*: delta introduced in this specific PR/commit.
+  2. *Pre-existing debt*: debt that was already present in the baseline.
+
+---
+
+## 7. Agent Skills Library & `npx skills` Compatibility
+
+AQG includes a vendor-neutral skills library in `skills/`:
+- `architecture-inspection`
+- `implementation-planning`
+- `component-reuse`
+- `change-containment`
+- `architecture-validation`
+- `technical-debt-prevention`
+
+### Standard `npx skills` Discovery
+AQG is 100% compatible with the standard `skills` CLI:
+```bash
+# List available skills
+npx skills add . --list
+
+# Use an architecture skill interactively
+npx skills use . --skill architecture-inspection
+
+# Add skills to agent environments
+npx skills add . --agent claude-code
+```
+
+Alternatively, use the built-in AQG skills manager:
+```bash
+agent-quality skills list
+agent-quality skills install --agent all
+```
+
+---
+
+## 8. CLI Command Reference
+
+| Command | Purpose |
+|---|---|
+| `agent-quality architecture inspect` | Inspect declared layers, protected modules, budgets, and exceptions. |
+| `agent-quality architecture diff` | Evaluate architectural impact of current git changes relative to baseline. |
+| `agent-quality architecture history` | View longitudinal maintainability trajectory across commits. |
+| `agent-quality architecture explain <id>` | Provide detailed evidence and Repair vs Refactor vs Raze remediation options. |
+| `agent-quality skills list` | List available portable agent skills. |
+| `agent-quality skills install` | Install skills into Claude Code, Gemini CLI, OpenCode, Codex, or local workspace. |
+| `agent-quality audit` | Full unified quality gate audit (Lighthouse + Architecture Health). |
+
+---
+
+## 9. False-Positive Limitations & Mitigation
 
 Heuristics are by definition probabilistic. AQG explicitly accounts for scenarios where architectural metrics could suggest debt where none exists:
 

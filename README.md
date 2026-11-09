@@ -95,6 +95,36 @@ agent-quality audit --all-routes
 agent-quality audit -p /path/to/project
 ```
 
+### Architecture Governance & Health
+
+```bash
+# Inspect declared layers, protected modules, and budgets
+agent-quality architecture inspect
+
+# Evaluate architectural delta of current changes vs Git baseline
+agent-quality architecture diff
+
+# View longitudinal health trends across successive commits
+agent-quality architecture history
+
+# Explain a specific finding with evidence and Repair/Refactor/Raze remediation options
+agent-quality architecture explain arch-change-amplification
+```
+
+### Agent Skills Library (`npx skills` compatible)
+
+AQG includes a vendor-neutral library of progressive-disclosure skills (`skills/`) discoverable by any agent environment.
+
+```bash
+# Add skills via npx skills
+npx skills add . --list
+npx skills use . --skill architecture-inspection
+
+# Or install directly into agent directories
+agent-quality skills list
+agent-quality skills install --agent all
+```
+
 ### Record Quality Baseline
 Records baseline measurements for regression tracking:
 ```bash
