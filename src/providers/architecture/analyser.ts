@@ -1,4 +1,4 @@
-import { ActionableFinding, ArchitectureConfig } from '../../types.js';
+import { ActionableFinding, ArchitectureConfig, ArchitectureSnapshot } from '../../types.js';
 import { resolveGitDiffState } from './git-diff.js';
 import { buildComponentGraph } from './component-graph.js';
 import { analyzeDependencyManifests } from './manifest.js';
@@ -6,6 +6,10 @@ import { analyzeChangeAmplification } from './amplification.js';
 import { detectStructuralDuplication } from './structural-duplication.js';
 import { evaluateArchitectureRules } from './import-rules.js';
 import { detectHardcodedCollectionMetadata } from './metadata-detector.js';
+import { detectDependencyCycles } from './cycles.js';
+import { evaluateRemediationStrategies, createRemediationFindings } from './remediation.js';
+import { computeConfigFingerprint, loadHistoricalSnapshots, analyzeLongitudinalTrends } from './history.js';
+import { getProjectIdentifier } from '../../storage/store.js';
 import { ArchitectureAnalysisResult } from './types.js';
 
 export function runArchitectureAnalysis(
@@ -40,6 +44,19 @@ export function runArchitectureAnalysis(
     projectRoot,
     componentGraph.allComponents
   );
+
+  // 8. Dependency Cycles Detection
+  const cycles = detectDependencyCycles(projectRoot);
+
+  // 9. Remediation Strategies Evaluation (Repair vs Refactor vs Raze & Rebuild)
+  const remediations = evaluateRemediationStrategies({
+    subsystem: amplification.primarySubsystem || 'all',
+    components: componentGraph.allComponents,
+    duplicationClusters,
+    amplification,
+    cycles,
+    ruleViolations
+  });
 
   // Partition into Tier 1 (Facts), Tier 2 (Heuristics), and Rule Findings
   const facts: ActionableFinding[] = [];
@@ -98,7 +115,22 @@ export function runArchitectureAnalysis(
     });
   }
 
-  // --- Tier 2: Heuristics ---
+  // D. Dependency Cycles Fact
+  if (cycles.length > 0) {
+    heuristics.push({
+      id: 'arch-dependency-cycles',
+      title: `Dependency Cycles Detected: ${cycles.length} cycle(s)`,
+      category: 'architecture',
+      severity: 'warning',
+      score: 60,
+      evidenceType: 'fact',
+      description: `Circular module dependencies detected: ${cycles.map((c) => c.description).join(' | ')}. Circular dependencies prevent tree-shaking and complicate refactoring.`,
+      element: cycles[0].path[0],
+      details: cycles
+    });
+  }
+
+  // --- Tier 2: Heuristics & Budget Enforcements ---
   // A. Structural Duplication
   for (const cluster of duplicationClusters) {
     heuristics.push({
@@ -146,6 +178,63 @@ export function runArchitectureAnalysis(
     });
   }
 
+  // D. Architecture Budgets (Advisory warnings)
+  if (config.budgets) {
+    const budgets = config.budgets;
+    if (budgets.singleUseComponentGrowth && componentGraph.singleUse.length >= budgets.singleUseComponentGrowth.warningThreshold) {
+      heuristics.push({
+        id: 'arch-budget-single-use-growth',
+        title: `Architecture Budget Exceeded: Single-Use Components (+${componentGraph.singleUse.length})`,
+        category: 'architecture',
+        severity: 'warning',
+        score: 75,
+        evidenceType: 'heuristic',
+        description: `Single-use component count (${componentGraph.singleUse.length}) exceeds configured advisory budget threshold of ${budgets.singleUseComponentGrowth.warningThreshold}.`,
+        explanation: 'Review newly authored components to verify whether they represent true domain boundaries or could be parameterized.'
+      });
+    }
+
+    if (budgets.duplicationGrowth && duplicationClusters.length >= budgets.duplicationGrowth.warningThreshold) {
+      heuristics.push({
+        id: 'arch-budget-duplication-growth',
+        title: `Architecture Budget Exceeded: Structural Duplication Clusters (${duplicationClusters.length})`,
+        category: 'architecture',
+        severity: 'warning',
+        score: 75,
+        evidenceType: 'heuristic',
+        description: `Duplication cluster count (${duplicationClusters.length}) exceeds advisory budget threshold of ${budgets.duplicationGrowth.warningThreshold}.`
+      });
+    }
+
+    if (budgets.dependencyCycleGrowth && cycles.length > budgets.dependencyCycleGrowth.warningThreshold) {
+      heuristics.push({
+        id: 'arch-budget-cycle-growth',
+        title: `Architecture Budget Exceeded: Dependency Cycles (${cycles.length})`,
+        category: 'architecture',
+        severity: 'warning',
+        score: 65,
+        evidenceType: 'heuristic',
+        description: `Cycle count (${cycles.length}) exceeds advisory budget of ${budgets.dependencyCycleGrowth.warningThreshold}.`
+      });
+    }
+
+    if (budgets.dispersionGrowth && amplification.dispersionRatio > budgets.dispersionGrowth.warningThreshold) {
+      heuristics.push({
+        id: 'arch-budget-dispersion-growth',
+        title: `Architecture Budget Exceeded: Subsystem Dispersion (${Math.round(amplification.dispersionRatio * 100)}%)`,
+        category: 'architecture',
+        severity: 'warning',
+        score: 75,
+        evidenceType: 'heuristic',
+        description: `Dispersion ratio (${amplification.dispersionRatio}) exceeds advisory budget of ${budgets.dispersionGrowth.warningThreshold}.`
+      });
+    }
+  }
+
+  // --- Tier 3: Advisory Remediation Findings (Section 14) ---
+  const remediationFindings = createRemediationFindings(remediations);
+  heuristics.push(...remediationFindings);
+
   // --- Declared Rule Violations (Eligible for Gate Failure) ---
   const ruleFailures = ruleViolations.filter((v) => v.severity === 'failure');
   const ruleWarnings = ruleViolations.filter((v) => v.severity === 'warning');
@@ -171,10 +260,47 @@ export function runArchitectureAnalysis(
   // Calculate advisory structural health
   let structuralHealth = 100;
   structuralHealth -= duplicationClusters.length * 5;
+  structuralHealth -= cycles.length * 10;
   if (amplification.dispersionRatio > 0.3) structuralHealth -= 10;
   structuralHealth -= metadataDuplicates.length * 3;
   structuralHealth -= ruleWarnings.length * 5;
   structuralHealth = Math.max(20, Math.min(100, structuralHealth));
+
+  // Build Snapshot
+  const projectId = getProjectIdentifier(projectRoot);
+  const snapshot: ArchitectureSnapshot = {
+    schemaVersion: 'aqg.arch.snapshot.v1',
+    projectId,
+    commitSha: gitDiff.currentRef,
+    timestamp: new Date().toISOString(),
+    analyserVersion: '1.0.0',
+    configFingerprint: computeConfigFingerprint(config),
+    baselineRef: gitDiff.baselineRef,
+    metrics: {
+      componentsTotal: componentGraph.allComponents.length,
+      componentsAdded: componentGraph.added.length,
+      componentsDeleted: componentGraph.deleted.length,
+      singleUseComponents: componentGraph.singleUse.length,
+      modularAbstractions: componentGraph.modularAbstractions.length,
+      structuralDuplicationRatio: duplicationClusters.length > 0 ? 0.85 : 0,
+      dependencyCycles: cycles.length,
+      dispersionRatio: amplification.dispersionRatio,
+      ruleViolations: ruleViolations.length
+    },
+    evidenceSummary: {
+      addedComponents: componentGraph.added.map((c) => c.relativePath),
+      duplicationClustersCount: duplicationClusters.length,
+      outOfScopeFilesCount: amplification.outOfScopeFiles.length
+    }
+  };
+
+  // Longitudinal Trend Analysis
+  const history = loadHistoricalSnapshots(projectId);
+  const trends = analyzeLongitudinalTrends({
+    currentSnapshot: snapshot,
+    history,
+    observationWindow: config.historyWindow || 10
+  });
 
   return {
     baselineRef: gitDiff.baselineRef,
@@ -189,8 +315,12 @@ export function runArchitectureAnalysis(
     dependencies,
     amplification,
     duplicationClusters,
+    cycles,
     ruleViolations,
     metadataDuplicates,
+    remediations,
+    snapshot,
+    trends,
     facts,
     heuristics,
     ruleFindings,

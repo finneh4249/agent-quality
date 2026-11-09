@@ -27,6 +27,70 @@ export interface ProtectedModuleRule {
   reason?: string;
 }
 
+export interface ArchitectureBudgetThreshold {
+  warningThreshold: number;
+}
+
+export interface ArchitectureBudgetsConfig {
+  singleUseComponentGrowth?: ArchitectureBudgetThreshold;
+  duplicationGrowth?: ArchitectureBudgetThreshold;
+  dependencyCycleGrowth?: ArchitectureBudgetThreshold;
+  dispersionGrowth?: ArchitectureBudgetThreshold;
+}
+
+export type RemediationStrategy = 'repair' | 'refactor' | 'raze_and_rebuild';
+
+export interface RemediationRecommendation {
+  strategy: RemediationStrategy;
+  target: string;
+  why: string;
+  whatShouldSurvive: string[];
+  whatShouldDisappear: string[];
+  replacementStrategy: string;
+  risks: string[];
+}
+
+export interface ArchitectureSnapshot {
+  schemaVersion: 'aqg.arch.snapshot.v1';
+  projectId: string;
+  commitSha: string;
+  timestamp: string;
+  analyserVersion: string;
+  configFingerprint: string;
+  baselineRef: string;
+  metrics: {
+    componentsTotal: number;
+    componentsAdded: number;
+    componentsDeleted: number;
+    singleUseComponents: number;
+    modularAbstractions: number;
+    structuralDuplicationRatio: number;
+    dependencyCycles: number;
+    dispersionRatio: number;
+    ruleViolations: number;
+  };
+  evidenceSummary: {
+    addedComponents: string[];
+    duplicationClustersCount: number;
+    outOfScopeFilesCount: number;
+  };
+}
+
+export interface LongitudinalTrend {
+  observationWindow: number;
+  isComparable: boolean;
+  comparabilityWarning?: string;
+  snapshotsCount: number;
+  trends: Record<string, {
+    current: number;
+    baseline: number;
+    delta: number;
+    direction: 'improving' | 'degrading' | 'stable';
+  }>;
+  currentChangeContribution: Record<string, number>;
+  existingDebt: Record<string, number>;
+}
+
 export interface ArchitectureConfig {
   baselineRef?: string;
   layers?: ArchitectureLayerRule[];
@@ -35,6 +99,8 @@ export interface ArchitectureConfig {
     warnOnSingleUseDirectory?: string[];
     minConsumersForExtraction?: number;
   };
+  budgets?: ArchitectureBudgetsConfig;
+  historyWindow?: number;
   exceptions?: ArchitectureRuleException[];
   ignorePaths?: string[];
   enableAiReview?: boolean;

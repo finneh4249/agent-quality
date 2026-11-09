@@ -7,6 +7,14 @@
     "agent-quality": "./bin/agent-quality.js"
   },
   "main": "./src/index.js",
+  "skills": "./skills",
+  "files": [
+    "bin",
+    "dist",
+    "skills",
+    "README.md",
+    "docs"
+  ],
   "scripts": {
     "build": "tsc",
     "test": "node --test test/*.test.js",

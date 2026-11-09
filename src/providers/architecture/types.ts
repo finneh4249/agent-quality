@@ -2,8 +2,12 @@ import {
   ActionableFinding,
   ActionableIssue,
   ArchitectureEvidenceType,
-  ArchitectureConfig
+  ArchitectureConfig,
+  RemediationRecommendation,
+  ArchitectureSnapshot,
+  LongitudinalTrend
 } from '../../types.js';
+import { DependencyCycle } from './cycles.js';
 
 export interface ComponentItem {
   path: string;
@@ -74,8 +78,12 @@ export interface ArchitectureAnalysisResult {
   dependencies: DependencyDiffItem[];
   amplification: AmplificationReport;
   duplicationClusters: DuplicationCluster[];
+  cycles: DependencyCycle[];
   ruleViolations: RuleViolationItem[];
   metadataDuplicates: MetadataDuplicateItem[];
+  remediations: RemediationRecommendation[];
+  snapshot: ArchitectureSnapshot;
+  trends?: LongitudinalTrend;
   facts: ActionableFinding[];
   heuristics: ActionableFinding[];
   ruleFindings: ActionableFinding[];

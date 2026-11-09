@@ -10,6 +10,8 @@ import {
 import { runArchitectureAnalysis } from './analyser.js';
 import { ArchitectureAnalysisResult } from './types.js';
 import { loadConfig } from '../../config.js';
+import { saveHistoricalSnapshot } from './history.js';
+import { getProjectIdentifier } from '../../storage/store.js';
 
 export class ArchitectureHealthProvider implements QualityProvider {
   id = 'architecture-health';
@@ -53,6 +55,11 @@ export class ArchitectureHealthProvider implements QualityProvider {
       archConfig || {}
     );
 
+    const projectId = getProjectIdentifier(context.projectRoot);
+    try {
+      saveHistoricalSnapshot(projectId, result.snapshot, archConfig?.historyWindow || 20);
+    } catch {}
+
     const allFindings = [
       ...result.ruleFindings,
       ...result.heuristics,
@@ -75,6 +82,9 @@ export class ArchitectureHealthProvider implements QualityProvider {
         description: v.message,
         score: v.severity === 'failure' ? 0 : 50
       })),
+      rawArtifacts: {
+        architectureJson: JSON.stringify(result, null, 2)
+      },
       durationMs: Date.now() - startTime
     };
 
